@@ -147,7 +147,19 @@ class TestUnreadableImages(unittest.TestCase):
 
     def test_a_pdf_is_still_treated_as_a_pdf(self):
         with tempfile.TemporaryDirectory() as tmp:
-            pdf = make_text_pdf(Path(tmp) / "doc.pdf", ["hello " * 60])
+            # Several ordinary lines: one very long line runs off the page and
+            # poppler, unlike pypdf, drops what falls outside it.
+            pdf = make_text_pdf(
+                Path(tmp) / "doc.pdf",
+                [
+                    "ACME LTD",
+                    "INVOICE 2024-05-02",
+                    "Invoice number INV-1234",
+                    "Payment due within 30 days of the invoice date, by bank transfer.",
+                    "Acme Ltd, 12 Example Street, London. VAT GB123456789.",
+                    "Thank you for your business; payment references the invoice number.",
+                ],
+            )
             config = load_config()
             result = extract(pdf, config.ocr)
             self.assertEqual(result.backend, "text-layer")
