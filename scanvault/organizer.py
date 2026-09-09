@@ -17,7 +17,7 @@ from typing import Any
 
 from .classify import DocumentMeta, classify
 from .config import BUCKETS, Config
-from .extract import OcrError, available_backend, extract, pdf_text
+from .extract import OcrError, available_backend, extract, needs_password, pdf_text
 from .llm import OllamaClient
 from .pipeline import process_file
 from .state import State
@@ -167,8 +167,11 @@ def plan(
         should_classify = reclassify or needs_classification(frontmatter)
 
         if ocr and attachment_needs_ocr(vault, frontmatter, config):
+            attachment = attachment_path(vault, frontmatter)
             reason = "attachment has no text layer"
-            if backend == "none":
+            if attachment is not None and needs_password(attachment):
+                reason = "attachment is password-protected (qpdf --decrypt to fix)"
+            elif backend == "none":
                 reason += " (no OCR backend installed)"
             action = Action("ocr", note, None, reason, None, frontmatter, "")
             action.needs_ocr = True
@@ -216,6 +219,13 @@ def plan(
                 vault.bucket_from_path(pdf) or config.vault.para.default_bucket
             )
             action = Action("adopt", pdf, None, "")
+            if needs_password(pdf):
+                action.reason = (
+                    "password-protected PDF; neither text extraction nor OCR can read "
+                    "it until the password is removed (qpdf --decrypt)"
+                )
+                report.actions.append(action)
+                continue
             if ocr and len(pdf_text(pdf)) < config.ocr.searchable_min_chars:
                 action.needs_ocr = True
                 action.reason = f'image-only PDF; will OCR, classify and file under "{destination}"'

@@ -32,8 +32,8 @@ The project is managed with [uv](https://docs.astral.sh/uv/).
 git clone git@github.com:vpetersson/obsidian-document-organizer.git
 cd obsidian-document-organizer
 uv sync                     # creates .venv and installs the project
-uv sync --extra fast        # optional: pypdf + fontTools for faster, more
-                            # accurate text extraction
+uv sync --extra fast        # optional: pypdf + fontTools + cryptography for
+                            # faster, more accurate text extraction
 ```
 
 `uv sync` picks up the pinned interpreter from `.python-version` and installs it
@@ -365,6 +365,26 @@ warnings are silenced by default; `-vv` brings them back when you want them.
 Installing the `fast` extra also pulls in fontTools, which removes the font
 warnings at the source and improves text extraction from PDFs that use CFF Type 1
 fonts.
+
+**`WARNING pypdf failed on X.pdf (cryptography>=3.1 is required for AES
+algorithm)`.** Some PDFs are encrypted with an empty password - banks do this
+constantly - and pypdf needs `cryptography` to read them. The `fast` extra
+installs it. Without it nothing is lost: poppler's `pdftotext` reads those files
+and the text still comes through.
+
+**A PDF that genuinely has a password.** `organize` reports it rather than
+pretending it can be filed:
+
+```
+[dry-run] adopt: Scanned/Locked statement.pdf (password-protected PDF; neither text
+extraction nor OCR can read it until the password is removed (qpdf --decrypt))
+```
+
+Remove the password and re-run:
+
+```bash
+qpdf --decrypt --password=yourpassword "Locked statement.pdf" decrypted.pdf
+```
 
 **`organize` looks like it is hanging on a big vault.** Planning hashes and
 probes every PDF that no note points at. It logs `scanned N PDFs...` every 50
