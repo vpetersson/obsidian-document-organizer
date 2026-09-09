@@ -12,7 +12,7 @@ from typing import Any, Iterator
 
 from . import __version__
 from .classify import DocumentMeta
-from .config import Config
+from .config import BUCKETS, Config
 from .util import parse_date, safe_filename, unique_path
 
 log = logging.getLogger(__name__)
@@ -82,6 +82,19 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     return data, content[match.end() :]
 
 
+PARA_INDEX_NOTES = {
+    "project": "Short-term efforts with a goal and a finish line. Move a "
+    "document here by setting `para: project` in its frontmatter.",
+    "area": "Ongoing responsibilities you maintain over time - health, "
+    "finances, a property, a vehicle.",
+    "resource": "Topics and reference material you want at hand but are not "
+    "actively working on.",
+    "archive": "Everything inactive, and the default home for scanned "
+    "documents. This is the cornerstone of the vault: scanvault files every "
+    "new scan here unless a note says otherwise.",
+}
+
+
 @dataclass
 class WriteResult:
     note_path: Path
@@ -98,8 +111,30 @@ class Vault:
 
     # ---- layout -----------------------------------------------------------
 
+    def para_folder(self, bucket: str) -> str:
+        """Folder name for a PARA bucket, falling back to the archive."""
+        para = self.config.vault.para
+        if bucket not in BUCKETS:
+            log.warning("unknown para bucket %r; filing under the archive", bucket)
+        return para.folder(bucket)
+
+    def bucket_from_path(self, path: Path) -> str | None:
+        """Which PARA folder a file currently sits in, if any."""
+        try:
+            relative = path.relative_to(self.root)
+        except ValueError:
+            return None
+        if not relative.parts:
+            return None
+        head = relative.parts[0]
+        for bucket, folder in self.config.vault.para.buckets().items():
+            if head == folder:
+                return bucket
+        return None
+
     def _render_template(self, template: str, meta: DocumentMeta) -> Path:
         values = {k: safe_filename(v) for k, v in meta.placeholders().items()}
+        values["para"] = safe_filename(self.para_folder(meta.para))
         try:
             rendered = template.format(**values)
         except KeyError as exc:
@@ -140,6 +175,7 @@ class Vault:
             "currency": meta.currency,
             "language": meta.language,
             "confidence": meta.confidence,
+            "para": meta.para,
             "classifier": meta.classifier,
             "scanvault_version": __version__,
             "processed": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -189,6 +225,24 @@ class Vault:
         note.write_text(self.render_note(meta, text, attachment, extra), encoding="utf-8")
         return WriteResult(note, attachment)
 
+    def scaffold(self, dry_run: bool = False) -> list[Path]:
+        """Create the PARA folders and their index notes. Never overwrites."""
+        created: list[Path] = []
+        for bucket, folder in self.config.vault.para.buckets().items():
+            directory = self.root / folder
+            index = directory / f"{folder}.md"
+            if index.exists():
+                continue
+            created.append(index)
+            if dry_run:
+                continue
+            directory.mkdir(parents=True, exist_ok=True)
+            body = dump_frontmatter({"title": folder, "para_index": True})
+            index.write_text(
+                f"{body}\n\n# {folder}\n\n{PARA_INDEX_NOTES[bucket]}\n", encoding="utf-8"
+            )
+        return created
+
     # ---- reading ----------------------------------------------------------
 
     def iter_notes(self) -> Iterator[Path]:
@@ -228,4 +282,5 @@ class Vault:
             tags=[str(t) for t in tags] if isinstance(tags, list) else [],
             reference=str(data.get("reference") or ""),
             classifier=str(data.get("classifier") or ""),
+            para=str(data.get("para") or "") or self.config.vault.para.default_bucket,
         )

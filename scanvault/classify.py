@@ -82,6 +82,9 @@ class DocumentMeta:
     currency: str = ""
     confidence: float | None = None
     classifier: str = "llm"  # "llm" | "heuristic"
+    # PARA bucket: project | area | resource | archive. Scans default to the
+    # archive; a human moves a note elsewhere by editing its frontmatter.
+    para: str = "archive"
 
     @property
     def year(self) -> str:
@@ -104,6 +107,7 @@ class DocumentMeta:
             "title": self.title,
             "slug": slugify(self.title),
             "correspondent": self.correspondent or "unknown",
+            "para": self.para,
         }
 
 

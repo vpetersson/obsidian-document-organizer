@@ -15,6 +15,7 @@ from .llm import LlmError, OllamaClient
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
 from .pipeline import ingest, iter_pdfs, watch
+from .vault import Vault
 
 log = logging.getLogger("scanvault")
 
@@ -39,12 +40,19 @@ num_ctx = 8192
 fallback_to_heuristics = true
 
 [vault]
-notes_dir = "Documents"
-attachments_dir = "Attachments"
-note_path_template = "{category}/{year}/{date} {title}"
-attachment_path_template = "{category}/{year}/{date} {title}"
+notes_dir = ""          # PARA folders live at the vault root
+attachments_dir = ""
+note_path_template = "{para}/{category}/{year}/{date} {title}"
+attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {title}"
 source_action = "move"  # move | copy | leave
 include_text = true
+
+[vault.para]
+projects_dir = "1 Projects"
+areas_dir = "2 Areas"
+resources_dir = "3 Resources"
+archive_dir = "4 Archive"
+default_bucket = "archive"   # where new scans land
 """
 
 
@@ -163,7 +171,13 @@ def cmd_organize(args: argparse.Namespace) -> int:
     if config.vault_dir is None:
         raise SystemExit("--vault is required")
     client = _client(args, config)
-    report = organizer_plan(config, client, reclassify=args.reclassify, adopt=not args.no_adopt)
+    report = organizer_plan(
+        config,
+        client,
+        reclassify=args.reclassify,
+        adopt=not args.no_adopt,
+        include_unmanaged=args.include_unmanaged,
+    )
     if args.apply:
         organizer_apply(report, config, client)
 
@@ -177,12 +191,28 @@ def cmd_organize(args: argparse.Namespace) -> int:
     summary = (
         f"\n{report.count('relocate')} to relocate, {report.count('rewrite')} to rewrite, "
         f"{report.count('adopt')} to adopt, {report.count('noop')} already filed, "
-        f"{report.count('failed')} failed"
+        f"{report.count('skipped')} left alone, {report.count('failed')} failed"
     )
     print(summary if not args.apply else summary.replace("to ", ""))
     if not args.apply:
         print("Nothing was changed. Re-run with --apply to execute.")
     return 1 if report.count("failed") else 0
+
+
+def cmd_init_vault(args: argparse.Namespace) -> int:
+    config = _build_config(args)
+    if config.vault_dir is None:
+        raise SystemExit("--vault is required")
+    vault = Vault(config)
+    if not args.dry_run:
+        vault.root.mkdir(parents=True, exist_ok=True)
+    created = vault.scaffold(dry_run=args.dry_run)
+    for path in created:
+        prefix = "would create" if args.dry_run else "created"
+        print(f"{prefix}: {path.relative_to(config.vault_dir).parent}")
+    if not created:
+        print(f"{config.vault_dir} already has the PARA folders")
+    return 0
 
 
 def cmd_doctor(args: argparse.Namespace) -> int:
@@ -283,8 +313,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_org.add_argument("--apply", action="store_true", help="execute (default is a dry run)")
     p_org.add_argument("--reclassify", action="store_true", help="re-run the model on every note")
     p_org.add_argument("--no-adopt", action="store_true", help="ignore loose PDFs in the vault")
+    p_org.add_argument(
+        "--include-unmanaged",
+        action="store_true",
+        help="also file notes scanvault did not write (default: leave them alone)",
+    )
     add_llm_flags(p_org)
     p_org.set_defaults(func=cmd_organize)
+
+    p_init_vault = sub.add_parser(
+        "init-vault", help="create the PARA (Second Brain) folders in a vault"
+    )
+    p_init_vault.add_argument("--vault", required=False)
+    p_init_vault.add_argument("--dry-run", action="store_true")
+    p_init_vault.set_defaults(func=cmd_init_vault)
 
     p_doctor = sub.add_parser("doctor", help="check OCR backends, ollama and the model")
     p_doctor.add_argument("--vault")

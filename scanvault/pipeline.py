@@ -79,8 +79,12 @@ def process_file(
     client: OllamaClient | None,
     state: State | None = None,
     dry_run: bool = False,
+    bucket: str | None = None,
 ) -> ProcessResult:
-    """OCR one PDF, classify it, and file it in the vault."""
+    """OCR one PDF, classify it, and file it in the vault.
+
+    `bucket` pins the PARA destination; without it a scan lands in the archive.
+    """
     digest = sha256_file(path)
     if state is not None:
         known = state.get(digest)
@@ -99,6 +103,7 @@ def process_file(
         return ProcessResult(path, "failed", error=f"{type(exc).__name__}: {exc}")
 
     meta = classify(extracted.text, config, client, source=path)
+    meta.para = bucket or config.vault.para.default_bucket
     extra = {
         "source_file": path.name,
         "source_hash": digest,
@@ -147,7 +152,9 @@ def ingest(
     if config.vault_dir is None:
         raise ValueError("vault_dir is required")
     vault = Vault(config)
-    vault.root.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        vault.root.mkdir(parents=True, exist_ok=True)
+        vault.scaffold()
     state = State(config.state_root) if use_state else None
 
     if paths is None:

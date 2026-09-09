@@ -14,6 +14,11 @@ from scanvault.state import State
 from scanvault.vault import Vault, parse_frontmatter
 from tests.helpers import StubClient, make_text_pdf
 
+
+def document_notes(vault: Vault) -> list:
+    """Notes for real documents, i.e. everything but the PARA index notes."""
+    return [note for note in vault.iter_notes() if not vault.read_note(note)[0].get("para_index")]
+
 HAS_PDFTOTEXT = shutil.which("pdftotext") is not None
 try:  # pypdf is optional; either extractor is fine for these tests
     import pypdf  # type: ignore  # noqa: F401
@@ -78,8 +83,8 @@ class TestPipeline(unittest.TestCase):
         report = ingest(self.config, client=StubClient(LLM_RESPONSE))
         self.assertEqual(report.count("ingested"), 1)
 
-        note = self.vault_dir / "Documents/Invoices/2024/2024-05-02 Acme Invoice INV-1234.md"
-        attachment = self.vault_dir / "Attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf"
+        note = self.vault_dir / "4 Archive/Invoices/2024/2024-05-02 Acme Invoice INV-1234.md"
+        attachment = self.vault_dir / "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf"
         self.assertTrue(note.is_file())
         self.assertTrue(attachment.is_file())
         self.assertFalse(self.pdf.exists(), "the original should have been moved into the vault")
@@ -101,7 +106,7 @@ class TestPipeline(unittest.TestCase):
         ingest(self.config, client=StubClient(LLM_RESPONSE))
         report = ingest(self.config, client=StubClient(LLM_RESPONSE))
         self.assertEqual(report.count("duplicate"), 1)
-        self.assertEqual(len(list(Vault(self.config).iter_notes())), 1)
+        self.assertEqual(len(document_notes(Vault(self.config))), 1)
 
     def test_state_records_the_document(self):
         ingest(self.config, client=StubClient(LLM_RESPONSE))

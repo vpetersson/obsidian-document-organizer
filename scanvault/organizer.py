@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .classify import DocumentMeta, classify
-from .config import Config
+from .config import BUCKETS, Config
 from .extract import OcrError, extract, pdf_text
 from .llm import OllamaClient
 from .pipeline import process_file
@@ -82,6 +82,28 @@ def note_text(vault: Vault, note: Path, frontmatter: dict[str, Any], body: str, 
     return re.sub(r"^#.*$", "", body, flags=re.MULTILINE).strip()
 
 
+def resolve_bucket(vault: Vault, note: Path, frontmatter: dict[str, Any], config: Config) -> str:
+    """Where a note belongs in PARA: its frontmatter wins, then its location.
+
+    Without the location fallback, moving a note into `1 Projects/` by hand
+    would be undone by the next organize run.
+    """
+    declared = frontmatter.get("para")
+    if isinstance(declared, str) and declared in BUCKETS:
+        return declared
+    return vault.bucket_from_path(note) or config.vault.para.default_bucket
+
+
+# Frontmatter keys scanvault writes; their presence marks a note as ours.
+MANAGED_KEYS = ("scanvault_version", "source_hash", "classifier", "attachment")
+
+
+def is_managed(frontmatter: dict[str, Any]) -> bool:
+    """True for notes scanvault wrote, so a Second Brain vault's own notes
+    (hand-written project and area notes) are never moved around."""
+    return any(frontmatter.get(key) for key in MANAGED_KEYS)
+
+
 def needs_classification(frontmatter: dict[str, Any]) -> bool:
     if any(not frontmatter.get(key) for key in REQUIRED_KEYS):
         return True
@@ -93,6 +115,7 @@ def plan(
     client: OllamaClient | None = None,
     reclassify: bool = False,
     adopt: bool = True,
+    include_unmanaged: bool = False,
 ) -> OrganizeReport:
     """Work out what the vault needs, without touching anything."""
     vault = Vault(config)
@@ -105,6 +128,13 @@ def plan(
             report.actions.append(Action("failed", note, error=str(exc)))
             continue
 
+        if frontmatter.get("para_index"):
+            report.actions.append(Action("noop", note, note, "PARA index note"))
+            continue
+        if not include_unmanaged and not is_managed(frontmatter):
+            report.actions.append(Action("skipped", note, note, "not a scanvault note"))
+            continue
+
         should_classify = reclassify or needs_classification(frontmatter)
         text = ""
         if should_classify:
@@ -114,6 +144,7 @@ def plan(
         else:
             meta = vault.meta_from_note(frontmatter, note.stem)
             reason = "layout drift"
+        meta.para = resolve_bucket(vault, note, frontmatter, config)
 
         target = vault.note_path(meta)
         if target.resolve() == note.resolve():
@@ -182,11 +213,12 @@ def apply(
 
     for action in report.actions:
         try:
-            if action.kind == "noop" or action.kind == "failed":
+            if action.kind in ("noop", "skipped", "failed"):
                 continue
 
             if action.kind == "adopt":
-                result = process_file(action.path, config, vault, client, state)
+                bucket = vault.bucket_from_path(action.path)
+                result = process_file(action.path, config, vault, client, state, bucket=bucket)
                 if result.status == "failed":
                     action.kind, action.error = "failed", result.error
                 else:

@@ -60,7 +60,8 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(config.vault_dir, Path("/tmp/v"))
         self.assertEqual(config.llm.model, "qwen3.5:9b")
         self.assertTrue(config.ocr.force)
-        self.assertEqual(config.notes_root, Path("/tmp/v/Documents"))
+        self.assertEqual(config.notes_root, Path("/tmp/v"))
+        self.assertEqual(config.vault.para.archive_dir, "4 Archive")
 
     def test_toml_file(self):
         with tempfile.TemporaryDirectory() as tmp:
