@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -18,10 +20,27 @@ class LlmError(RuntimeError):
     """Raised when ollama is unreachable or returns something unusable."""
 
 
+def is_loopback(url: str) -> bool:
+    """True when the URL points at this machine."""
+    hostname = (urllib.parse.urlparse(url).hostname or "").lower()
+    if hostname in ("localhost", "localhost.localdomain"):
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
 class OllamaClient:
     def __init__(self, config: LlmConfig):
         self.config = config
         self.host = config.host.rstrip("/")
+        if not is_loopback(self.host) and not config.allow_remote_host:
+            raise LlmError(
+                f"{self.host} is not on this machine, and classifying a document "
+                "means sending its text to it. Set `allow_remote_host = true` "
+                "under [llm] if that is what you want."
+            )
 
     def _post(self, path: str, payload: dict[str, Any], timeout: int | None = None) -> dict[str, Any]:
         request = urllib.request.Request(

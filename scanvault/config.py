@@ -54,6 +54,9 @@ class OcrConfig:
 @dataclass
 class LlmConfig:
     host: str = "http://localhost:11434"
+    # Sending document text to another machine is the one way this tool can
+    # leak anything, so it has to be asked for.
+    allow_remote_host: bool = False
     model: str = "qwen3.5:9b"
     # Fall back to heuristics instead of failing when ollama is unreachable.
     fallback_to_heuristics: bool = True

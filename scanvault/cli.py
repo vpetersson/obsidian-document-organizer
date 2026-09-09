@@ -11,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from .config import CONFIG_FILENAME, Config, find_config, load_config
 from .extract import available_backend, extract, pdf_text
-from .llm import LlmError, OllamaClient
+from .llm import LlmError, OllamaClient, is_loopback
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
 from .pipeline import ingest, iter_pdfs, watch
@@ -33,7 +33,8 @@ min_text_chars = 180
 force = false
 
 [llm]
-host = "http://localhost:11434"
+host = "http://localhost:11434"   # a non-local host is refused unless allowed below
+allow_remote_host = false
 model = "qwen3.5:9b"
 temperature = 0.0
 num_ctx = 8192
@@ -125,7 +126,10 @@ def _client(args: argparse.Namespace, config: Config) -> OllamaClient | None:
     if getattr(args, "no_llm", False):
         log.info("--no-llm: using heuristic classification")
         return None
-    client = OllamaClient(config.llm)
+    try:
+        client = OllamaClient(config.llm)
+    except LlmError as exc:
+        raise SystemExit(str(exc)) from exc
     if not client.available():
         if not config.llm.fallback_to_heuristics:
             raise SystemExit(f"ollama is not reachable at {config.llm.host}")
@@ -307,7 +311,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except ImportError:
         print("pypdf       : not installed (optional, falls back to pdftotext)")
 
-    client = OllamaClient(config.llm)
+    try:
+        client = OllamaClient(config.llm)
+    except LlmError as exc:
+        print(f"ollama      : REFUSED {exc}")
+        return 0
+    where = "on this machine" if is_loopback(config.llm.host) else "REMOTE - text leaves this machine"
+    print(f"model host  : {config.llm.host} ({where})")
     try:
         models = client.list_models()
         print(f"ollama      : reachable at {config.llm.host} ({len(models)} models)")

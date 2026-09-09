@@ -127,3 +127,31 @@ class TestOllamaClient(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHostIsLocalByDefault(unittest.TestCase):
+    """Document text must not leave the machine without being asked to."""
+
+    def test_loopback_forms_are_recognised(self):
+        from scanvault.llm import is_loopback
+
+        for url in ("http://localhost:11434", "http://127.0.0.1:11434", "http://[::1]:11434"):
+            self.assertTrue(is_loopback(url), url)
+        for url in ("http://ollama.example.com:11434", "http://192.168.1.50:11434"):
+            self.assertFalse(is_loopback(url), url)
+
+    def test_a_remote_host_is_refused_by_default(self):
+        with self.assertRaises(LlmError) as caught:
+            OllamaClient(LlmConfig(host="http://192.168.1.50:11434"))
+        message = str(caught.exception)
+        self.assertIn("not on this machine", message)
+        self.assertIn("allow_remote_host", message)
+
+    def test_a_remote_host_works_when_asked_for(self):
+        client = OllamaClient(LlmConfig(host="http://192.168.1.50:11434", allow_remote_host=True))
+        self.assertEqual(client.host, "http://192.168.1.50:11434")
+
+    def test_localhost_needs_no_permission(self):
+        self.assertEqual(
+            OllamaClient(LlmConfig(host="http://localhost:11434")).host, "http://localhost:11434"
+        )

@@ -2,12 +2,16 @@
 
 [![CI](https://github.com/vpetersson/obsidian-document-organizer/actions/workflows/ci.yml/badge.svg)](https://github.com/vpetersson/obsidian-document-organizer/actions/workflows/ci.yml)
 
-Turn a scanner's output folder into an organized Obsidian vault. The package and
-CLI are called `scanvault`.
+Private document management for scanned paper. Point it at the folder your
+scanner writes to and it gives you an organized Obsidian vault of searchable
+PDFs and notes — **without any of it leaving your machine**. No account, no
+cloud service, no telemetry: OCR runs locally, classification runs against
+[ollama](https://ollama.com) on localhost, and your documents stay files you own
+in a folder you chose. The package and CLI are called `scanvault`.
 
 * **Phase 1 — OCR.** Every incoming PDF is checked for a text layer; image-only
   scans are run through OCR and re-saved as a searchable PDF.
-* **Phase 2 — Organize.** The text is sent to a local [ollama](https://ollama.com)
+* **Phase 2 — Organize.** The text goes to a local ollama
   model (default `qwen3.5:9b`), which returns a title, category, date,
   correspondent, tags and a summary. scanvault writes an Obsidian note with that
   metadata as YAML frontmatter and files both the note and the PDF into a dated
@@ -23,6 +27,48 @@ lands. See [Vault layout](#vault-layout-para).
 
 No Python dependencies — the standard library only. External tools (OCR engine,
 ollama) are detected at runtime and reported by `scanvault doctor`.
+
+## Privacy
+
+The point of running this locally is that documents like these — invoices,
+medical letters, bank statements, anything with your address on it — are exactly
+what you do not want in someone else's system.
+
+**What leaves your machine: nothing.** There is one kind of outbound request in
+the whole codebase, in `scanvault/llm.py`, and it goes to the ollama host you
+configured. That host must be on this machine: a non-loopback address is refused
+unless you set `allow_remote_host = true` under `[llm]`, because classifying a
+document means sending its text there. `scanvault doctor` prints which it is.
+
+There is no analytics, no update check, no crash reporting, and nothing is
+uploaded — not the PDFs, not the OCR text, not the metadata. Disconnect the
+machine from the network and everything except pulling a model still works.
+
+**What runs locally:** OCR through `ocrmypdf`/`tesseract`, text extraction
+through poppler or pypdf, classification through ollama, and the filing logic
+itself, which is standard-library Python.
+
+**What is written, and where:** everything lives inside the vault you point at.
+
+| Path | Contents |
+| --- | --- |
+| `<vault>/…` | Your notes and PDFs, as plain Markdown and PDF files |
+| `<vault>/.scanvault/index.json` | SHA-256 of each filed document, so re-runs skip it |
+| `<vault>/.scanvault/classifications.json` | The model's answers, cached so a preview is not paid for twice |
+| `<vault>/.scanvault/work/` | Temporary OCR output |
+
+Nothing is written outside the vault, and deleting `.scanvault/` costs you only
+the dedupe index and the cache.
+
+Two things worth being deliberate about, because they are your choice rather
+than the tool's:
+
+* the OCR text is embedded in each note so Obsidian can search it, which means
+  the contents of a document are in plain text in your vault — set
+  `include_text = false` under `[vault]` if you would rather they were not;
+* if your vault sits in iCloud, Dropbox or a Git remote, your documents go
+  wherever that syncs them. That is outside this tool, but it is the part most
+  likely to matter.
 
 ## Install
 
@@ -289,7 +335,8 @@ searchable_min_chars = 10          # a vault PDF with less text than this has no
 force = false                      # re-OCR even when a text layer exists
 
 [llm]
-host = "http://localhost:11434"
+host = "http://localhost:11434"   # must be this machine unless you allow otherwise
+allow_remote_host = false
 model = "qwen3.5:9b"
 num_ctx = 8192
 fallback_to_heuristics = true      # keep filing when ollama is down
