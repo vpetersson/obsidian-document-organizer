@@ -131,6 +131,7 @@ class TestBucketRouting(unittest.TestCase):
         )
         report = plan(self.config, client=None)
         self.assertEqual(report.count("relocate"), 0)
+        self.assertEqual(report.count("noop"), 1, "only the document counts as filed")
         action = next(a for a in report.actions if a.path == note)
         self.assertEqual(action.kind, "noop")
         self.assertEqual(action.meta.para, "project")
@@ -160,11 +161,12 @@ class TestBucketRouting(unittest.TestCase):
         )
         self.assertIn(f"![[{frontmatter['attachment']}]]", body)
 
-    def test_index_notes_are_left_alone(self):
+    def test_index_notes_are_left_alone_and_not_counted_as_documents(self):
         report = plan(self.config, client=None)
         reasons = {action.reason for action in report.actions}
         self.assertEqual(reasons, {"PARA index note"})
-        self.assertEqual(report.count("noop"), 4)
+        self.assertEqual(report.count("index"), 4)
+        self.assertEqual(report.count("noop"), 0, "scaffolding is not a filed document")
 
 
 class TestUnmanagedNotes(unittest.TestCase):

@@ -221,8 +221,11 @@ def cmd_organize(args: argparse.Namespace) -> int:
     if not preview:
         organizer_apply(report, config, client)
 
+    # These say "nothing happens here"; on a real vault they are hundreds of
+    # lines that bury the ones that do something. The summary still counts them.
+    quiet_kinds = ("noop", "index", "skipped")
     for action in report.actions:
-        if action.kind == "noop" and not args.verbose:
+        if action.kind in quiet_kinds and not args.verbose:
             continue
         prefix = "[dry-run] " if preview else ""
         print(prefix + action.describe(config.vault_dir))
@@ -242,7 +245,7 @@ def cmd_organize(args: argparse.Namespace) -> int:
     if report.count("skipped"):
         print(
             f"{report.count('skipped')} notes were left alone because scanvault did not "
-            "write them; pass --include-unmanaged to file those too."
+            "write them; pass --include-unmanaged to file those too, or -v to list them."
         )
     print_preview_trailer(preview)
     return 1 if report.count("failed") else 0
@@ -331,6 +334,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", help=f"path to {CONFIG_FILENAME}")
     parser.add_argument("-v", "--verbose", action="count", default=0)
     parser.add_argument("-q", "--quiet", action="store_true")
+    # Repeated on every subcommand so `scanvault organize -v` works as well as
+    # `scanvault -v organize`; SUPPRESS keeps the outer value when omitted.
+    verbosity = argparse.ArgumentParser(add_help=False)
+    verbosity.add_argument(
+        "-v", "--verbose", action="count", default=argparse.SUPPRESS, help="more detail"
+    )
+    verbosity.add_argument(
+        "-q", "--quiet", action="store_true", default=argparse.SUPPRESS, help="less detail"
+    )
+
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_llm_flags(sp: argparse.ArgumentParser) -> None:
@@ -338,7 +351,9 @@ def build_parser() -> argparse.ArgumentParser:
         sp.add_argument("--ollama-host", help="ollama base URL")
         sp.add_argument("--no-llm", action="store_true", help="skip ollama, use heuristics")
 
-    p_ingest = sub.add_parser("ingest", help="OCR and file new scans into the vault")
+    p_ingest = sub.add_parser(
+        "ingest", help="OCR and file new scans into the vault", parents=[verbosity]
+    )
     p_ingest.add_argument("--source", required=False, help="folder (or file) with scanned PDFs")
     p_ingest.add_argument("--vault", required=False, help="Obsidian vault folder")
     p_ingest.add_argument("--force-ocr", action="store_true", help="OCR even if a text layer exists")
@@ -350,7 +365,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_llm_flags(p_ingest)
     p_ingest.set_defaults(func=cmd_ingest)
 
-    p_watch = sub.add_parser("watch", help="poll the source folder and ingest new scans")
+    p_watch = sub.add_parser(
+        "watch", help="poll the source folder and ingest new scans", parents=[verbosity]
+    )
     p_watch.add_argument("--source", required=False)
     p_watch.add_argument("--vault", required=False)
     p_watch.add_argument("--interval", type=float, default=20.0)
@@ -362,7 +379,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_llm_flags(p_watch)
     p_watch.set_defaults(func=cmd_watch)
 
-    p_ocr = sub.add_parser("ocr", help="phase 1 only: OCR PDFs and report extracted text")
+    p_ocr = sub.add_parser(
+        "ocr", help="phase 1 only: OCR PDFs and report extracted text", parents=[verbosity]
+    )
     p_ocr.add_argument("paths", nargs="+")
     p_ocr.add_argument("--out", help="folder for the searchable PDFs")
     p_ocr.add_argument("--text-out", help="folder for extracted .txt files")
@@ -371,7 +390,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_execution_flags(p_ocr)
     p_ocr.set_defaults(func=cmd_ocr)
 
-    p_org = sub.add_parser("organize", help="reorganize documents already in the vault")
+    p_org = sub.add_parser(
+        "organize", help="reorganize documents already in the vault", parents=[verbosity]
+    )
     p_org.add_argument("--vault", required=False)
     p_org.add_argument("--reclassify", action="store_true", help="re-run the model on every note")
     p_org.add_argument("--no-adopt", action="store_true", help="ignore loose PDFs in the vault")
@@ -390,20 +411,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_org.set_defaults(func=cmd_organize)
 
     p_init_vault = sub.add_parser(
-        "init-vault", help="create the PARA (Second Brain) folders in a vault"
+        "init-vault",
+        help="create the PARA (Second Brain) folders in a vault",
+        parents=[verbosity],
     )
     p_init_vault.add_argument("--vault", required=False)
     add_execution_flags(p_init_vault)
     p_init_vault.set_defaults(func=cmd_init_vault)
 
-    p_doctor = sub.add_parser("doctor", help="check OCR backends, ollama and the model")
+    p_doctor = sub.add_parser(
+        "doctor", help="check OCR backends, ollama and the model", parents=[verbosity]
+    )
     p_doctor.add_argument("--vault")
     p_doctor.add_argument("--source")
     p_doctor.add_argument("--model")
     p_doctor.add_argument("--ollama-host")
     p_doctor.set_defaults(func=cmd_doctor)
 
-    p_init = sub.add_parser("init-config", help=f"write a sample {CONFIG_FILENAME}")
+    p_init = sub.add_parser(
+        "init-config", help=f"write a sample {CONFIG_FILENAME}", parents=[verbosity]
+    )
     p_init.add_argument("--output", "-o")
     p_init.add_argument("--force", action="store_true")
     add_execution_flags(p_init)

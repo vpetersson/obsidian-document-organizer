@@ -173,9 +173,14 @@ scanvault organize --vault ~/Obsidian/Archive
 [dry-run] duplicate: WireLoad receipts/Scanbot Mar 5, 2017 11.57 AM - 1.pdf (same content as 4 Archive/Receipts/2017/2017-03-05 Coffee House.md)
 
 1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt (1 of them need OCR), 12 already filed, 1 duplicates, 3 left alone, 0 failed
-3 notes were left alone because scanvault did not write them; pass --include-unmanaged to file those too.
+3 notes were left alone because scanvault did not write them; pass --include-unmanaged to file those too, or -v to list them.
 Nothing was changed. Re-run with --apply to execute.
 ```
+
+Only the lines that mean something get printed: notes that are already filed,
+left alone or part of the PARA scaffolding are counted in the summary but not
+listed, because on a real vault those are hundreds of lines that bury the ones
+that matter. `-v` lists everything, and works before or after the subcommand.
 
 What each action means:
 
@@ -188,6 +193,7 @@ What each action means:
 | `duplicate` | Byte-identical to a document already filed. Reported, never filed twice and never deleted. |
 | `already filed` | Nothing to do. |
 | `left alone` | A note scanvault did not write — see below. |
+| `index` | A PARA index note: scaffolding, never touched and never counted as a document. |
 
 Folders are provenance, not clutter: a PDF adopted from `WireLoad receipts/To
 expense/` keeps `source_folder: "WireLoad receipts/To expense"` in its
