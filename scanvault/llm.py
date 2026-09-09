@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -62,14 +63,13 @@ class OllamaClient:
         base = wanted.split(":", 1)[0]
         return any(name == wanted or name.split(":", 1)[0] == base for name in names)
 
-    def chat_json(
+    def _chat(
         self,
         system: str,
         user: str,
-        schema: dict[str, Any] | None = None,
-        images: list[str] | None = None,
-    ) -> dict[str, Any]:
-        """One-shot chat constrained to JSON; returns the parsed object."""
+        schema: dict[str, Any] | None,
+        images: list[str] | None,
+    ) -> str:
         message: dict[str, Any] = {"role": "user", "content": user}
         if images:
             message["images"] = images
@@ -79,19 +79,54 @@ class OllamaClient:
             "stream": False,
             "keep_alive": self.config.keep_alive,
             "format": schema if schema else "json",
+            # Reasoning models otherwise spend the whole response thinking and
+            # return empty content. Older ollama builds ignore the field.
+            "think": False,
             "options": {
                 "temperature": self.config.temperature,
                 "num_ctx": self.config.num_ctx,
             },
         }
         data = self._post("/api/chat", payload)
-        content = (data.get("message") or {}).get("content", "")
+        message_out = data.get("message") or {}
+        content = message_out.get("content") or ""
+        if not content.strip():
+            # Some builds put a reasoning model's whole answer here instead.
+            content = message_out.get("thinking") or ""
+        return content
+
+    def chat_json(
+        self,
+        system: str,
+        user: str,
+        schema: dict[str, Any] | None = None,
+        images: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """One-shot chat constrained to JSON; returns the parsed object."""
+        content = self._chat(system, user, schema, images)
+        if not content.strip() and schema is not None:
+            # A JSON-schema `format` is not understood by every model or every
+            # ollama version; plain JSON mode usually is.
+            log.warning(
+                "%s returned an empty response for a schema request; retrying in plain JSON mode",
+                self.config.model,
+            )
+            content = self._chat(system, user, None, images)
+        if not content.strip():
+            raise LlmError(
+                f"{self.config.model} returned an empty response. Check that "
+                f"`ollama run {self.config.model}` answers, and that the model is "
+                "not a reasoning-only build."
+            )
         return parse_json_object(content)
 
 
+THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+
+
 def parse_json_object(content: str) -> dict[str, Any]:
-    """Parse a JSON object, tolerating code fences and leading prose."""
-    text = (content or "").strip()
+    """Parse a JSON object, tolerating code fences, prose and think blocks."""
+    text = THINK_BLOCK_RE.sub("", content or "").strip()
     if text.startswith("```"):
         text = text.split("```")[1] if text.count("```") >= 2 else text.strip("`")
         if text.lstrip().startswith("json"):

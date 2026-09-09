@@ -404,9 +404,20 @@ Remove the password and re-run:
 qpdf --decrypt --password=yourpassword "Locked statement.pdf" decrypted.pdf
 ```
 
-**`organize` looks like it is hanging on a big vault.** Planning hashes and
-probes every PDF that no note points at. It logs `scanned N PDFs...` every 50
-files, so you can tell it is working.
+**`classification fell back to heuristics: model did not return JSON: ''`.** The
+model answered with nothing. Usually one of two things: it is a reasoning build
+that spent the whole response thinking, or the ollama version does not honour a
+JSON-schema `format`. scanvault asks for thinking to be switched off, reads the
+`thinking` field when the content is empty, and retries once in plain JSON mode
+before giving up — and when it does give up it names the model instead of
+silently degrading. `scanvault doctor` now asks the model for one JSON object,
+so this shows up in a two-second check rather than halfway through a long run.
+
+**`organize` looks like it is hanging on a big vault.** It should not any more:
+planning logs `scanning N notes`, then `[i/N] classifying <note>` for every note
+it sends to the model, then `scanned N PDFs...` every 50 files while it looks for
+unfiled PDFs. Applying logs `[i/N] <action> <file>`. Add `-q` if you would rather
+have silence.
 
 ## Notes and limits
 

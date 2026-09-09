@@ -150,7 +150,10 @@ def plan(
         except OcrError as exc:
             log.warning("%s", exc)
 
-    for note in vault.iter_notes():
+    notes = list(vault.iter_notes())
+    log.info("scanning %d notes", len(notes))
+    classified = 0
+    for index, note in enumerate(notes, start=1):
         try:
             frontmatter, body = vault.read_note(note)
         except OSError as exc:
@@ -183,6 +186,9 @@ def plan(
 
         text = ""
         if should_classify:
+            classified += 1
+            # Each of these is a model call, so say which one we are on.
+            log.info("[%d/%d] classifying %s", index, len(notes), note.name)
             text = note_text(vault, note, frontmatter, body, config)
             meta = classify(text, config, client, source=note)
             reason = "reclassified" if reclassify else "incomplete metadata"
@@ -204,6 +210,8 @@ def plan(
 
     if adopt:
         known_hashes = State(config.state_root).documents
+        if classified:
+            log.info("classified %d notes; looking for PDFs no note points at", classified)
         for index, pdf in enumerate(vault.iter_loose_pdfs(), start=1):
             if index % 50 == 0:
                 # A vault of several hundred PDFs takes a while to hash and
@@ -311,11 +319,20 @@ def apply(
     """Execute a plan. Returns the same report with kinds updated to what happened."""
     vault = Vault(config)
     state = State(config.state_root) if use_state else None
+    todo = [
+        action
+        for action in report.actions
+        if action.kind not in ("noop", "index", "skipped", "duplicate", "failed")
+    ]
+    log.info("applying %d changes", len(todo))
+    done = 0
 
     for action in report.actions:
         try:
             if action.kind in ("noop", "index", "skipped", "duplicate", "failed"):
                 continue
+            done += 1
+            log.info("[%d/%d] %s %s", done, len(todo), action.kind, action.path.name)
 
             if action.kind == "adopt":
                 bucket = vault.bucket_from_path(action.path)

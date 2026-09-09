@@ -184,8 +184,9 @@ def ingest(
         paths = iter_pdfs(config.source_dir)
 
     report = Report()
-    for path in paths:
-        log.info("processing %s", path)
+    paths = list(paths)
+    for index, path in enumerate(paths, start=1):
+        log.info("[%d/%d] %s", index, len(paths), path.name)
         report.results.append(
             process_file(
                 path, config, vault, client, state, dry_run, source_root=config.source_dir
