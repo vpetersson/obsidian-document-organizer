@@ -11,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from .config import CONFIG_FILENAME, Config, find_config, load_config
 from .extract import _image_converter, available_backend, extract, pdf_text
-from .llm import LlmError, OllamaClient
+from .llm import LlmError, OllamaClient, is_local_host
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
 from .pipeline import ingest, iter_documents, watch
@@ -38,7 +38,7 @@ force = false
 fallbacks = ["filename", "pdf-metadata", "file-created"]
 
 [llm]
-host = "http://localhost:11434"
+host = "http://localhost:11434"   # any ollama endpoint; the default keeps everything local
 model = "qwen3.5:9b"
 temperature = 0.0
 num_ctx = 8192
@@ -324,6 +324,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("pypdf       : not installed (optional, falls back to pdftotext)")
 
     client = OllamaClient(config.llm)
+    where = (
+        "this machine"
+        if is_local_host(config.llm.host)
+        else "not this machine - document text is sent there"
+    )
+    print(f"model host  : {config.llm.host} ({where})")
     try:
         models = client.list_models()
         print(f"ollama      : reachable at {config.llm.host} ({len(models)} models)")

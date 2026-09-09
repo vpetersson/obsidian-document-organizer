@@ -2,14 +2,18 @@
 
 [![CI](https://github.com/vpetersson/obsidian-document-organizer/actions/workflows/ci.yml/badge.svg)](https://github.com/vpetersson/obsidian-document-organizer/actions/workflows/ci.yml)
 
-Turn a scanner's output folder into an organized Obsidian vault. The package and
-CLI are called `scanvault`.
+Private document management for scanned paper. Point it at the folder your
+scanner writes to and it gives you an organized Obsidian vault of searchable PDFs
+and notes. **All of it can run on your own machine** — OCR is local software and
+the classifier is [ollama](https://ollama.com), pointed at `localhost` by
+default. No account, no cloud service, no telemetry, and your documents stay
+files you own in a folder you chose. The package and CLI are called `scanvault`.
 
 * **Phase 1 — OCR.** Every incoming PDF is checked for a text layer; image-only
   scans are run through OCR and re-saved as a searchable PDF. Photos —
   `.jpg`, `.png`, `.tiff`, `.heic` and friends — are converted to a searchable
   PDF the same way, so a picture of a receipt is a document like any other.
-* **Phase 2 — Organize.** The text is sent to a local [ollama](https://ollama.com)
+* **Phase 2 — Organize.** The text goes to a local ollama
   model (default `qwen3.5:9b`), which returns a title, category, date,
   correspondent, tags and a summary. scanvault writes an Obsidian note with that
   metadata as YAML frontmatter and files both the note and the PDF into a dated
@@ -25,6 +29,57 @@ lands. See [Vault layout](#vault-layout-para).
 
 No Python dependencies — the standard library only. External tools (OCR engine,
 ollama) are detected at runtime and reported by `scanvault doctor`.
+
+## Privacy
+
+The point of running this locally is that documents like these — invoices,
+medical letters, bank statements, anything with your address on it — are exactly
+what you do not want in someone else's system.
+
+**All of it can run on your own machine, and by default it does.** OCR is local
+software. The classifier is whatever ollama endpoint you configure, and the
+default is `http://localhost:11434` — so out of the box, with a model pulled,
+you can disconnect the machine from the network entirely and the whole pipeline
+still works.
+
+There is exactly one outbound request in the codebase, in `scanvault/llm.py`, and
+it goes to that ollama host. Where you point it is your call: the machine you are
+on, the box with the GPU in the next room, or something further away. Classifying
+a document means sending its text to whatever you chose, and `scanvault doctor`
+tells you which it is:
+
+```
+model host  : http://localhost:11434 (this machine)
+```
+
+Nothing else phones anywhere. No analytics, no update check, no crash reporting,
+no account — not the PDFs, not the OCR text, not the metadata.
+
+**What runs locally:** OCR through `ocrmypdf`/`tesseract`, text extraction
+through poppler or pypdf, classification through ollama, and the filing logic
+itself, which is standard-library Python.
+
+**What is written, and where:** everything lives inside the vault you point at.
+
+| Path | Contents |
+| --- | --- |
+| `<vault>/…` | Your notes and PDFs, as plain Markdown and PDF files |
+| `<vault>/.scanvault/index.json` | SHA-256 of each filed document, so re-runs skip it |
+| `<vault>/.scanvault/classifications.json` | The model's answers, cached so a preview is not paid for twice |
+| `<vault>/.scanvault/work/` | Temporary OCR output |
+
+Nothing is written outside the vault, and deleting `.scanvault/` costs you only
+the dedupe index and the cache.
+
+Two things worth being deliberate about, because they are your choice rather
+than the tool's:
+
+* the OCR text is embedded in each note so Obsidian can search it, which means
+  the contents of a document are in plain text in your vault — set
+  `include_text = false` under `[vault]` if you would rather they were not;
+* if your vault sits in iCloud, Dropbox or a Git remote, your documents go
+  wherever that syncs them. That is outside this tool, but it is the part most
+  likely to matter.
 
 ## Install
 
@@ -388,7 +443,7 @@ searchable_min_chars = 10          # a vault PDF with less text than this has no
 force = false                      # re-OCR even when a text layer exists
 
 [llm]
-host = "http://localhost:11434"
+host = "http://localhost:11434"   # any ollama endpoint; the default keeps it all local
 model = "qwen3.5:9b"
 num_ctx = 8192
 fallback_to_heuristics = true      # keep filing when ollama is down
