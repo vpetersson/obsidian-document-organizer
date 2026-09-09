@@ -56,22 +56,22 @@ class TestVault(unittest.TestCase):
         note = self.vault.note_path(meta())
         self.assertEqual(
             note.relative_to(self.root).as_posix(),
-            "4 Archive/Invoices/2024/2024-05-02 Acme Invoice.md",
+            "4 Archive/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice.md",
         )
         attachment = self.vault.attachment_path(meta())
         self.assertEqual(
             attachment.relative_to(self.root).as_posix(),
-            "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf",
+            "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice.pdf",
         )
 
     def test_undated_documents_get_their_own_folder(self):
         note = self.vault.note_path(meta(document_date=None))
-        self.assertIn("Invoices/undated/undated Acme Invoice", note.as_posix())
+        self.assertIn("Invoices/undated/undated Acme Ltd - Acme Invoice", note.as_posix())
 
     def test_title_with_slash_does_not_escape_the_folder(self):
         note = self.vault.note_path(meta(title="2024/05 Statement"))
         self.assertEqual(note.parent.name, "2024")
-        self.assertEqual(note.name, "2024-05-02 2024-05 Statement.md")
+        self.assertEqual(note.name, "2024-05-02 Acme Ltd - 2024-05 Statement.md")
 
     def test_custom_template(self):
         self.config.vault.note_path_template = "{correspondent}/{year}-{month} {slug}"
@@ -100,7 +100,7 @@ class TestVault(unittest.TestCase):
         self.assertIn("date: 2024-05-02", content)
         self.assertIn("  - invoices", content)
         self.assertIn('source_hash: "abc"', content)
-        self.assertIn("![[4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf]]", content)
+        self.assertIn("![[4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice.pdf]]", content)
         self.assertIn("OCR TEXT HERE", content)
 
     def test_copy_keeps_the_original(self):
@@ -123,7 +123,7 @@ class TestVault(unittest.TestCase):
             pdf.write_bytes(b"%PDF-1.4 fake")
             self.vault.write_document(meta(), "text", pdf_path=pdf, source_path=pdf)
         notes = sorted(p.name for p in self.vault.iter_notes())
-        self.assertEqual(notes, ["2024-05-02 Acme Invoice-2.md", "2024-05-02 Acme Invoice.md"])
+        self.assertEqual(notes, ["2024-05-02 Acme Ltd - Acme Invoice-2.md", "2024-05-02 Acme Ltd - Acme Invoice.md"])
 
     def test_include_text_disabled(self):
         self.config.vault.include_text = False

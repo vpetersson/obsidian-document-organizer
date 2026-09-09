@@ -121,6 +121,7 @@ Archive/
 title: "Acme Invoice INV-1234"
 date: 2024-05-02
 date_source: "document"
+title_source: "model"
 category: "Invoices"
 correspondent: "Acme Ltd"
 tags:
@@ -263,6 +264,34 @@ fallbacks = ["filename", "pdf-metadata", "file-created"]
 Reorder that list to change precedence, or set it to `[]` to leave undated
 documents in the `undated` folder rather than guessing.
 
+## Naming a document
+
+A scan arrives called `SwiftScan Feb 7, 2021 11.45 AM.pdf` or `Scan 10.pdf`.
+Neither is a name, so neither is kept: the note *and the PDF* are named from what
+the document turned out to be.
+
+```
+4 Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md
+4 Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf
+```
+
+That is `{date} {name}`, where `{name}` is the correspondent and the title
+together — `Example Bank - Annual statement` — collapsing to just the title when
+there is no correspondent, and never repeating a correspondent that is already
+part of the title.
+
+The original filename is used only as a last resort, and only after the scanner
+noise is stripped out of it: app names, timestamps, `- 1` duplicate markers and
+`Scanned Documents`-style placeholders all go, and what remains has to contain
+actual words. `Boiler service 2019-04-02 - 1.pdf` becomes `Boiler service`;
+`Scan 10.pdf` becomes nothing, and the note is `Untitled document` until the
+model or a re-run gives it a better one. Each note records where its title came
+from in `title_source` (`model`, `text` or `filename`), so
+`title_source: "filename"` finds the ones worth a second look.
+
+Renaming an existing vault is `organize --apply`: it will show every document
+whose filename does not match its metadata as a `relocate`.
+
 ## Vault layout (PARA)
 
 The four folders are the PARA framework from *Building a Second Brain*:
@@ -345,8 +374,8 @@ fallbacks = ["filename", "pdf-metadata", "file-created"]
 [vault]
 notes_dir = ""                     # the PARA folders live at the vault root
 attachments_dir = ""
-note_path_template = "{para}/{category}/{year}/{date} {title}"
-attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {title}"
+note_path_template = "{para}/{category}/{year}/{date} {name}"
+attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {name}"
 source_action = "move"             # move | copy | leave
 include_text = true
 tag_source_folder = true           # turn the folder a document came from into tags
@@ -359,7 +388,7 @@ archive_dir = "4 Archive"
 default_bucket = "archive"         # where a new scan goes
 ```
 
-Template placeholders: `{para} {category} {year} {month} {date} {title} {slug} {correspondent}`,
+Template placeholders: `{para} {category} {year} {month} {date} {name} {title} {slug} {correspondent}`,
 where `{para}` is the folder for the note's bucket. Drop `{para}` from the
 templates for a flat, non-PARA vault.
 Undated documents get `undated` for `{date}`/`{year}`, so nothing is silently

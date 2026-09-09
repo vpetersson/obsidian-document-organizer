@@ -139,6 +139,39 @@ def date_from_filename(name: str) -> date | None:
     return parse_date(stem)
 
 
+# Names scanner apps give their output, plus the clock they stamp on it.
+_SCANNER_TOKENS = re.compile(
+    r"\b(scanbot|scanpro|swiftscan|camscanner|genius\s*scan|adobe\s*scan|scanned?\s+documents?"
+    r"|scan|scanned|img|image|dsc|doc|document|untitled|new)\b",
+    re.I,
+)
+_TIME_FRAGMENT = re.compile(r"\b\d{1,2}[.:]\d{2}\s*(am|pm)?\b", re.I)
+_DATE_FRAGMENT = re.compile(
+    rf"\b(\d{{4}}[-._]\d{{2}}[-._]\d{{2}}|\d{{8}}|({_MONTH_NAMES})[a-z]*\s+\d{{1,2}},?\s*\d{{4}}"
+    rf"|\d{{1,2}}\s+({_MONTH_NAMES})[a-z]*\s+\d{{4}})\b",
+    re.I,
+)
+_COPY_SUFFIX = re.compile(r"[\s_-]*(\(\d+\)|-\s*\d+|copy(\s*\d+)?)$", re.I)
+
+
+def clean_document_name(stem: str) -> str:
+    """Strip scanner noise out of a filename so what is left can be a title.
+
+    "SwiftScan Feb 7, 2021 11.45 AM" has nothing in it worth keeping; "Boiler
+    service 2019-04-02 - 1" reduces to "Boiler service".
+    """
+    name = re.sub(r"[_]+", " ", stem)
+    name = _DATE_FRAGMENT.sub(" ", name)
+    name = _TIME_FRAGMENT.sub(" ", name)
+    name = _SCANNER_TOKENS.sub(" ", name)
+    name = _COPY_SUFFIX.sub("", name)
+    name = re.sub(r"\s{2,}", " ", name).strip(" -–—_.,")
+    # A couple of stray characters, or a bare number, is not a title.
+    if len(name) < 3 or not re.search(r"[^\W\d_]{3}", name):
+        return ""
+    return name
+
+
 def file_created_date(path: Path) -> date | None:
     """The file's creation date where the platform records one, else mtime."""
     try:
