@@ -89,6 +89,9 @@ def _configure_logging(verbose: int, quiet: bool) -> None:
     else:
         level = logging.INFO
     logging.basicConfig(level=level, format="%(levelname)s %(message)s", stream=sys.stderr)
+    # basicConfig is a no-op once a handler exists, so set the level directly:
+    # without this, -q and -v would be ignored on any second call in a process.
+    logging.getLogger().setLevel(level)
     library_level = logging.DEBUG if verbose > 1 else logging.ERROR
     for name in NOISY_LIBRARIES:
         logging.getLogger(name).setLevel(library_level)
