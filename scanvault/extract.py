@@ -17,6 +17,21 @@ from .util import parse_date
 log = logging.getLogger(__name__)
 
 
+# Formats a scanner or a phone might leave in the folder alongside PDFs.
+IMAGE_SUFFIXES = frozenset(
+    {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".webp", ".heic", ".heif"}
+)
+# Formats the OCR toolchain generally cannot open itself.
+NEEDS_CONVERSION = frozenset({".heic", ".heif", ".webp"})
+
+
+DOCUMENT_SUFFIXES = frozenset({".pdf"}) | IMAGE_SUFFIXES
+
+
+def is_image(path: Path) -> bool:
+    return path.suffix.lower() in IMAGE_SUFFIXES
+
+
 class OcrError(RuntimeError):
     """Raised when OCR was required but could not be performed."""
 
@@ -210,8 +225,92 @@ def _tesseract(src: Path, dst: Path, config: OcrConfig) -> str:
     return pdf_text(dst)
 
 
+def _image_converter() -> str | None:
+    """A tool that can turn an odd image format into something OCR can read."""
+    for candidate in ("magick", "convert", "heif-convert", "sips"):
+        if shutil.which(candidate):
+            return candidate
+    return None
+
+
+def _to_png(src: Path, dst: Path, timeout: int) -> None:
+    tool = _image_converter()
+    if tool is None:
+        raise OcrError(
+            f"{src.name} is a {src.suffix.lstrip('.')} image and no converter is installed "
+            "(install ImageMagick, or libheif's heif-convert for HEIC)"
+        )
+    if tool == "sips":
+        cmd = ["sips", "-s", "format", "png", str(src), "--out", str(dst)]
+    elif tool == "heif-convert":
+        cmd = ["heif-convert", str(src), str(dst)]
+    else:
+        cmd = [tool, str(src), str(dst)]
+    result = _run(cmd, timeout)
+    if result.returncode != 0 or not dst.exists():
+        raise OcrError(f"{tool} could not convert {src.name}: {result.stderr.strip()[:300]}")
+
+
+def image_to_pdf(src: Path, dst: Path, config: OcrConfig) -> str:
+    """Turn an image into a searchable PDF. Returns the backend that did it."""
+    backend = available_backend(config)
+    if backend == "none":
+        raise OcrError(
+            f"{src.name} is an image, so it can only be filed by OCR'ing it, and no "
+            "OCR backend is installed (install ocrmypdf, or tesseract + poppler-utils)"
+        )
+
+    source = src
+    tmp_png: Path | None = None
+    if src.suffix.lower() in NEEDS_CONVERSION:
+        tmp_png = dst.with_suffix(".converted.png")
+        _to_png(src, tmp_png, config.timeout)
+        source = tmp_png
+
+    try:
+        if backend == "ocrmypdf":
+            cmd = [
+                "ocrmypdf",
+                "--language",
+                config.languages,
+                "--image-dpi",
+                str(config.image_dpi),
+                "--output-type",
+                "pdf",
+                str(source),
+                str(dst),
+            ]
+            result = _run(cmd, config.timeout)
+            if result.returncode != 0 or not dst.exists():
+                raise OcrError(
+                    f"ocrmypdf could not read {src.name} ({result.returncode}): "
+                    f"{result.stderr.strip()[:300]}"
+                )
+        else:
+            stem = dst.with_suffix("")
+            result = _run(
+                ["tesseract", str(source), str(stem), "-l", config.languages, "pdf"],
+                config.timeout,
+            )
+            if result.returncode != 0 or not dst.exists():
+                raise OcrError(
+                    f"tesseract could not read {src.name}: {result.stderr.strip()[:300]}"
+                )
+    finally:
+        if tmp_png is not None:
+            tmp_png.unlink(missing_ok=True)
+    return backend
+
+
 def extract(path: Path, config: OcrConfig, work_dir: Path | None = None) -> ExtractResult:
     """Return the document's text, OCR'ing first if the PDF is image-only."""
+    if is_image(path):
+        work_dir = work_dir or path.parent
+        work_dir.mkdir(parents=True, exist_ok=True)
+        dst = work_dir / f"{path.stem}.ocr.pdf"
+        backend = image_to_pdf(path, dst, config)
+        return ExtractResult(pdf_text(dst), True, backend, dst, page_count(dst))
+
     if needs_password(path):
         raise OcrError(
             f"{path.name} is password-protected; remove the password first, "

@@ -42,6 +42,7 @@ def _schema(categories: list[str]) -> dict[str, Any]:
             "correspondent": {"type": "string"},
             "summary": {"type": "string"},
             "tags": {"type": "array", "items": {"type": "string"}},
+            "subjects": {"type": "array", "items": {"type": "string"}},
             "language": {"type": "string"},
             "reference": {"type": "string"},
             "amount": {"type": "string"},
@@ -52,7 +53,9 @@ def _schema(categories: list[str]) -> dict[str, Any]:
     }
 
 
-def build_prompt(text: str, config: Config, filename: str | None = None) -> str:
+def build_prompt(
+    text: str, config: Config, filename: str | None = None, folder: str | None = None
+) -> str:
     categories = ", ".join(config.categories)
     parts = [
         "Classify the document below.",
@@ -64,7 +67,16 @@ def build_prompt(text: str, config: Config, filename: str | None = None) -> str:
         "letter date), as YYYY-MM-DD. Not today's date. Null if absent.",
         "- correspondent: the organisation or person the document is from.",
         "- summary: 1-3 sentences on what this document is and why it matters.",
-        "- tags: 3-8 short lowercase topical keywords, no '#', no spaces (use dashes).",
+        "- tags: 4-8 lowercase keywords, dashed, no '#'. Tag what the document IS "
+        "(mortgage-statement, council-tax, payslip, insurance-policy, tax-return), "
+        "what it is ABOUT (a topic like mortgage, pension, car, renovation), and the "
+        "kind of sender (bank, tax-authority, local-government, utility, insurer). "
+        "Do not tag the date, the file format, or the word 'document'.",
+        "- subjects: the specific things this document concerns, as they appear in "
+        "the text - a property address, a vehicle registration, an account holder, a "
+        "policy or account number. These become tags, so someone can search for the "
+        "property and find everything about it. Empty list if the document is not "
+        "about a specific thing.",
         "- reference: invoice/account/case number if present.",
         "- amount + currency: the document's headline total, if it has one.",
         "- confidence: 0.0-1.0, how sure you are about category and title.",
@@ -73,6 +85,9 @@ def build_prompt(text: str, config: Config, filename: str | None = None) -> str:
     ]
     if filename:
         parts.append(f"Original filename: {filename}")
+    if folder:
+        # Where someone filed it by hand is a strong hint about what it is.
+        parts.append(f"Folder it was found in: {folder}")
     parts += ["Document text:", '"""', truncate_words(text, config.llm.max_chars), '"""']
     return "\n".join(parts)
 
@@ -85,6 +100,8 @@ class DocumentMeta:
     document_date: date | None = None
     correspondent: str = ""
     tags: list[str] = field(default_factory=list)
+    # What the document is about: a property, a vehicle, an account holder.
+    subjects: list[str] = field(default_factory=list)
     language: str = ""
     reference: str = ""
     amount: str = ""
@@ -138,15 +155,40 @@ class DocumentMeta:
         }
 
 
+def rule_tags(config: Config, *haystacks: str) -> list[str]:
+    """Tags the keyword rules insist on, whatever the model thought.
+
+    A letter from a tax authority is about taxes even when the model called it
+    "Correspondence", and that is exactly the search someone will run.
+    """
+    text = "\n".join(part.lower() for part in haystacks if part)
+    return [tag for tag, keywords in config.tags.rules.items() if any(k in text for k in keywords)]
+
+
 def _clean_tags(raw: Any, config: Config, meta_extra: list[str]) -> list[str]:
+    """Assemble the tag list, keeping the deterministic ones first."""
     tags: list[str] = []
-    for value in list(config.vault.base_tags) + meta_extra + (raw if isinstance(raw, list) else []):
+    for value in list(config.tags.base) + meta_extra + (raw if isinstance(raw, list) else []):
         if not isinstance(value, str):
             continue
         tag = slugify(value.lstrip("#"), max_length=40)
         if tag and tag not in tags:
             tags.append(tag)
-    return tags[: max(len(config.vault.base_tags), config.vault.max_tags)]
+    return tags[: max(len(config.tags.base) + len(meta_extra), config.tags.max_tags)]
+
+
+def derived_tags(meta: DocumentMeta, config: Config, text: str = "") -> list[str]:
+    """Everything we can tag without asking the model: category, year, sender,
+    what the document is about, and whatever the keyword rules match."""
+    derived = [slugify(meta.category)]
+    if config.tags.year_tag and meta.document_date:
+        derived.append(f"year-{meta.document_date.year}")
+    if config.tags.correspondent_tag and meta.correspondent:
+        derived.append(slugify(meta.correspondent, max_length=40))
+    if config.tags.subject_tags:
+        derived.extend(slugify(subject, max_length=40) for subject in meta.subjects[:3])
+    derived.extend(rule_tags(config, meta.title, meta.correspondent, meta.summary, text[:4000]))
+    return [tag for tag in derived if tag]
 
 
 def _match_category(value: Any, config: Config) -> str:
@@ -161,27 +203,36 @@ def _match_category(value: Any, config: Config) -> str:
     return config.categories[-1] if config.categories else "Other"
 
 
-def from_response(data: dict[str, Any], config: Config, fallback_title: str) -> DocumentMeta:
+def from_response(
+    data: dict[str, Any], config: Config, fallback_title: str, text: str = ""
+) -> DocumentMeta:
     """Normalise a raw model response into a DocumentMeta we can trust."""
     model_title = str(data.get("title") or "").strip()
     title = model_title or fallback_title
     category = _match_category(data.get("category"), config)
     correspondent = str(data.get("correspondent") or "").strip()
     confidence = data.get("confidence")
-    return DocumentMeta(
+    subjects = [
+        str(item).strip()[:80]
+        for item in (data.get("subjects") or [])
+        if isinstance(item, str) and item.strip()
+    ]
+    meta = DocumentMeta(
         title=re.sub(r"\s{2,}", " ", title)[:120],
         category=category,
         summary=str(data.get("summary") or "").strip(),
         document_date=parse_date(data.get("document_date")),
         correspondent=correspondent[:120],
         title_source="model" if model_title else "filename",
-        tags=_clean_tags(data.get("tags"), config, [slugify(category)]),
+        subjects=subjects[:5],
         language=str(data.get("language") or "").strip(),
         reference=str(data.get("reference") or "").strip()[:80],
         amount=str(data.get("amount") or "").strip()[:40],
         currency=str(data.get("currency") or "").strip()[:8],
         confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
     )
+    meta.tags = _clean_tags(data.get("tags"), config, derived_tags(meta, config, text))
+    return meta
 
 
 def resolve_date(meta: DocumentMeta, source: Path | None, config: Config) -> DocumentMeta:
@@ -242,16 +293,17 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
     )
     title = (first_line[:80] or fallback_title).strip()
     title_source = "text" if first_line else "filename"
-    return DocumentMeta(
+    meta = DocumentMeta(
         title=title,
         category=category,
         summary="",
         document_date=parse_date(text[:4000]),
-        tags=_clean_tags(["unclassified"], config, [slugify(category)]),
         confidence=0.2,
         classifier="heuristic",
         title_source=title_source,
     )
+    meta.tags = _clean_tags(["unclassified"], config, derived_tags(meta, config, text))
+    return meta
 
 
 def classify(
@@ -274,12 +326,17 @@ def classify(
 
     cached = cache.get(text) if cache is not None else None
     if cached is not None:
-        return from_response(cached, config, fallback_title)
+        return from_response(cached, config, fallback_title, text)
 
     try:
         data = client.chat_json(
             SYSTEM_PROMPT,
-            build_prompt(text, config, source.name if source else None),
+            build_prompt(
+                text,
+                config,
+                source.name if source else None,
+                source.parent.name if source else None,
+            ),
             schema=_schema(config.categories),
         )
     except LlmError as exc:
@@ -289,4 +346,4 @@ def classify(
         return heuristic(text, config, fallback_title)
     if cache is not None:
         cache.put(text, data)
-    return from_response(data, config, fallback_title)
+    return from_response(data, config, fallback_title, text)

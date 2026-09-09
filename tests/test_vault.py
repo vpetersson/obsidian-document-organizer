@@ -130,14 +130,14 @@ class TestVault(unittest.TestCase):
         result = self.vault.write_document(meta(), "SECRET OCR", pdf_path=None)
         self.assertNotIn("SECRET OCR", result.note_path.read_text())
 
-    def test_iter_loose_pdfs_skips_linked_attachments(self):
+    def test_iter_loose_documents_skips_linked_attachments(self):
         pdf = Path(self.tmp.name) / "scan.pdf"
         pdf.write_bytes(b"%PDF-1.4 fake")
         self.vault.write_document(meta(), "text", pdf_path=pdf, source_path=pdf)
         loose = self.root / "Inbox" / "loose.pdf"
         loose.parent.mkdir(parents=True)
         loose.write_bytes(b"%PDF-1.4 fake")
-        self.assertEqual([p.name for p in self.vault.iter_loose_pdfs()], ["loose.pdf"])
+        self.assertEqual([p.name for p in self.vault.iter_loose_documents()], ["loose.pdf"])
 
 
 if __name__ == "__main__":

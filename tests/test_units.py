@@ -111,7 +111,7 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(meta.title, "Acme Invoice")
         self.assertEqual(meta.category, "Invoices")
         self.assertEqual(meta.document_date, date(2024, 5, 2))
-        self.assertEqual(meta.tags, ["scan", "invoices", "acme", "bill"])
+        self.assertEqual(meta.tags, ["scan", "invoices", "year-2024", "acme", "bill"])
         self.assertEqual(meta.year, "2024")
 
     def test_unknown_category_falls_back_to_last(self):

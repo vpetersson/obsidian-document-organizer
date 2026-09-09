@@ -11,7 +11,7 @@ from typing import Iterable, Iterator
 from .cache import ClassificationCache
 from .classify import DocumentMeta, classify, resolve_date
 from .config import Config
-from .extract import OcrError, extract
+from .extract import DOCUMENT_SUFFIXES, OcrError, extract, is_image
 from .llm import OllamaClient
 from .state import State
 from .util import sha256_file, slugify
@@ -19,7 +19,7 @@ from .vault import Vault
 
 log = logging.getLogger(__name__)
 
-SUPPORTED_SUFFIXES = {".pdf"}
+SUPPORTED_SUFFIXES = DOCUMENT_SUFFIXES
 
 
 @dataclass
@@ -48,7 +48,7 @@ class Report:
         return [result for result in self.results if result.status == "failed"]
 
 
-def iter_pdfs(source: Path, recursive: bool = True) -> Iterator[Path]:
+def iter_documents(source: Path, recursive: bool = True) -> Iterator[Path]:
     if source.is_file():
         yield source
         return
@@ -141,6 +141,7 @@ def process_file(
         source_path=path,
         extra=extra,
         dry_run=dry_run,
+        original_path=path if is_image(path) else None,
     )
     if state is not None and not dry_run:
         state.record(
@@ -189,7 +190,7 @@ def ingest(
     if paths is None:
         if config.source_dir is None:
             raise ValueError("source_dir is required")
-        paths = iter_pdfs(config.source_dir)
+        paths = iter_documents(config.source_dir)
 
     report = Report()
     paths = list(paths)
@@ -230,7 +231,9 @@ def watch(
     round_number = 0
     while iterations is None or round_number < iterations:
         round_number += 1
-        pending = [p for p in iter_pdfs(config.source_dir) if is_stable(p, settle_seconds)]
+        pending = [
+            p for p in iter_documents(config.source_dir) if is_stable(p, settle_seconds)
+        ]
         if pending:
             total.results.extend(ingest(config, pending, client, dry_run=dry_run).results)
         if iterations is not None and round_number >= iterations:

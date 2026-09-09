@@ -44,6 +44,8 @@ class OcrConfig:
     searchable_min_chars: int = 10
     # Re-OCR even when a text layer is present.
     force: bool = False
+    # Assumed resolution when a bare image carries none.
+    image_dpi: int = 300
     rotate_pages: bool = True
     deskew: bool = True
     optimize: int = 1
@@ -63,6 +65,55 @@ class DateConfig:
     """
 
     fallbacks: list[str] = field(default_factory=lambda: list(DATE_SOURCES))
+
+
+# Keyword -> tag rules applied on top of whatever the model returns, so a
+# document from a tax authority is tagged `taxes` whether or not the model
+# thought to. Matched case-insensitively against the title, the correspondent
+# and the start of the text.
+DEFAULT_TAG_RULES: dict[str, list[str]] = {
+    "taxes": [
+        "hmrc", "hm revenue", "revenue & customs", "revenue and customs", "self assessment",
+        "irs.gov", "internal revenue service", "skatteverket", "inkomstdeklaration",
+        "finanzamt", "agenzia delle entrate", "canada revenue agency", "australian taxation",
+        "tax return", "corporation tax", "vat return", "capital gains", "paye",
+    ],
+    "government": [
+        "council tax", "borough of", "kommun", "county council", "ministry of", "home office",
+        "companies house", "bolagsverket", "land registry", "dvla", "passport office",
+        "migrationsverket", "electoral register", "register of electors", "försäkringskassan",
+        "department for", "gov.uk",
+    ],
+    "mortgage": ["mortgage", "remortgage", "redemption statement", "loan to value", "bolån"],
+    "property": [
+        "tenancy", "leasehold", "freehold", "landlord", "estate agent", "service charge",
+        "ground rent", "stamp duty", "conveyanc",
+    ],
+    "insurance": ["policy number", "insurance certificate", "premium", "no claims", "försäkring"],
+    "utilities": [
+        "electricity", "gas supply", "water and wastewater", "broadband", "meter reading",
+        "energy bill", "tariff",
+    ],
+    "banking": ["sort code", "iban", "account statement", "bankgiro", "swift/bic"],
+    "vehicle": ["mot test", "v5c", "vehicle registration", "logbook", "besiktning"],
+    "medical": ["nhs", "patient", "prescription", "vaccination", "vårdcentral", "1177"],
+    "employment": ["payslip", "p60", "p45", "employment contract", "anställningsavtal"],
+    "education": ["tuition", "student loan", "csn", "enrolment", "transcript of records"],
+}
+
+
+@dataclass
+class TagConfig:
+    # Extra tags every note gets.
+    base: list[str] = field(default_factory=lambda: ["scan"])
+    # Add a `year-2024` tag, so a year's paperwork is one search away.
+    year_tag: bool = True
+    # Tag the sender, so everything from one organisation is one search away.
+    correspondent_tag: bool = True
+    # Tag what the document is about - a property, a vehicle, an account.
+    subject_tags: bool = True
+    max_tags: int = 12
+    rules: dict[str, list[str]] = field(default_factory=lambda: {k: list(v) for k, v in DEFAULT_TAG_RULES.items()})
 
 
 @dataclass
@@ -128,12 +179,11 @@ class VaultConfig:
     attachment_path_template: str = "{para}/_attachments/{category}/{year}/{date} {name}"
     # move | copy | leave
     source_action: str = "move"
-    # Extra tags added to every note.
-    base_tags: list[str] = field(default_factory=lambda: ["scan"])
     # Turn the folder a document came from into tags, so an existing folder
     # tree ("Work receipts/To expense") survives the move into PARA.
     tag_source_folder: bool = True
-    max_tags: int = 8
+    # An image is filed as a searchable PDF; keep the picture it came from too.
+    keep_original_image: bool = True
     # Embed the OCR text in the note so Obsidian search can reach it.
     include_text: bool = True
     max_text_chars: int = 20000
@@ -149,6 +199,7 @@ class Config:
     language_hint: str = "English"
     ocr: OcrConfig = field(default_factory=OcrConfig)
     dates: DateConfig = field(default_factory=DateConfig)
+    tags: TagConfig = field(default_factory=TagConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)
     vault: VaultConfig = field(default_factory=VaultConfig)
 
