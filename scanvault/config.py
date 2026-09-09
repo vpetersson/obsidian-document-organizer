@@ -271,6 +271,9 @@ class VaultConfig:
     keep_original_image: bool = True
     # Embed the OCR text in the note so Obsidian search can reach it.
     include_text: bool = True
+    # How that text is presented: a callout folded shut by default, an HTML
+    # <details> block, or the plain heading it used to be.
+    extracted_text_style: str = "callout"
     max_text_chars: int = 20000
     # Written under the vault; holds the dedupe index.
     state_dir: str = ".scanvault"

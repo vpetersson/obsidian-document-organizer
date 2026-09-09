@@ -208,17 +208,24 @@ Invoice INV-1234 from Acme Ltd for 120.00 EUR.
 
 ![[4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf]]
 
-## Extracted text
-
-```text
-ACME LTD
-INVOICE 2024-05-02
-…
+> [!quote]- Extracted text
+> ```text
+> ACME LTD
+> INVOICE 2024-05-02
+> …
+> ```
 ```
-```
 
-The extracted text is embedded so Obsidian's own search finds documents by their
-contents; turn it off with `include_text = false`.
+That last block is a callout, and the `-` after the type is what makes Obsidian
+render it folded shut — so a page of OCR does not bury the summary and the
+attachment while you are browsing, but the text is still in the file and search
+still finds it. `[vault] extracted_text_style` takes `callout` (the default),
+`details` for an HTML `<details>` block, or `plain` for the old heading, and
+`include_text = false` leaves the text out altogether.
+
+Notes written before this pick up the new shape on the next
+`organize --apply`, which reports them as `extracted text is plain, not callout`
+and rewrites them around the text they already hold.
 
 ## Organizing an existing vault
 
