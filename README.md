@@ -32,7 +32,8 @@ The project is managed with [uv](https://docs.astral.sh/uv/).
 git clone git@github.com:vpetersson/obsidian-document-organizer.git
 cd obsidian-document-organizer
 uv sync                     # creates .venv and installs the project
-uv sync --extra fast        # optional: adds pypdf for faster text extraction
+uv sync --extra fast        # optional: pypdf + fontTools for faster, more
+                            # accurate text extraction
 ```
 
 `uv sync` picks up the pinned interpreter from `.python-version` and installs it
@@ -354,6 +355,20 @@ skipping.
 The suite is stdlib-only. It builds real PDFs on the fly and stubs the ollama
 client, so it needs neither a model nor an OCR engine; tests that need a PDF text
 extractor skip themselves if neither `pypdf` nor `pdftotext` is present.
+
+## Troubleshooting
+
+**A wall of `WARNING Ignoring wrong pointing object` / `fontTools is required to
+fully parse ...`.** That is pypdf commenting on the internals of scanned PDFs,
+which are frequently malformed in ways that do not matter. Those library
+warnings are silenced by default; `-vv` brings them back when you want them.
+Installing the `fast` extra also pulls in fontTools, which removes the font
+warnings at the source and improves text extraction from PDFs that use CFF Type 1
+fonts.
+
+**`organize` looks like it is hanging on a big vault.** Planning hashes and
+probes every PDF that no note points at. It logs `scanned N PDFs...` every 50
+files, so you can tell it is working.
 
 ## Notes and limits
 

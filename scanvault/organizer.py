@@ -199,7 +199,11 @@ def plan(
 
     if adopt:
         known_hashes = State(config.state_root).documents
-        for pdf in vault.iter_loose_pdfs():
+        for index, pdf in enumerate(vault.iter_loose_pdfs(), start=1):
+            if index % 50 == 0:
+                # A vault of several hundred PDFs takes a while to hash and
+                # probe; say something rather than looking hung.
+                log.info("scanned %d PDFs...", index)
             filed = known_hashes.get(sha256_file(pdf))
             if filed:
                 # Same bytes as a document already in the vault: a second copy

@@ -14,6 +14,7 @@ dependencies = []
 [project.optional-dependencies]
 # pypdf gives faster, dependency-free text extraction; poppler's pdftotext is used otherwise.
 fast = [
+    "fonttools>=4.64.0",
     "pypdf>=4.0",
 ]
 

@@ -56,9 +56,22 @@ default_bucket = "archive"   # where new scans land
 """
 
 
+# pypdf and friends log a warning per malformed object and per unusual font.
+# On a vault of scanned PDFs that is thousands of lines that bury the plan.
+NOISY_LIBRARIES = ("pypdf", "PIL", "fontTools", "pdfminer")
+
+
 def _configure_logging(verbose: int, quiet: bool) -> None:
-    level = logging.WARNING if quiet else (logging.DEBUG if verbose > 1 else logging.INFO if verbose else logging.INFO)
+    if quiet:
+        level = logging.WARNING
+    elif verbose > 1:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
     logging.basicConfig(level=level, format="%(levelname)s %(message)s", stream=sys.stderr)
+    library_level = logging.DEBUG if verbose > 1 else logging.ERROR
+    for name in NOISY_LIBRARIES:
+        logging.getLogger(name).setLevel(library_level)
 
 
 def _build_config(args: argparse.Namespace) -> Config:

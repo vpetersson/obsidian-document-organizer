@@ -182,3 +182,38 @@ class TestState(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLoggingSetup(unittest.TestCase):
+    """Third-party PDF chatter must not bury the plan output."""
+
+    def setUp(self):
+        import logging
+
+        self.saved = {
+            name: logging.getLogger(name).level for name in ("pypdf", "fontTools", "scanvault")
+        }
+
+    def tearDown(self):
+        import logging
+
+        for name, level in self.saved.items():
+            logging.getLogger(name).setLevel(level)
+
+    def test_library_loggers_are_quiet_by_default(self):
+        import logging
+
+        from scanvault.cli import _configure_logging
+
+        _configure_logging(verbose=0, quiet=False)
+        self.assertFalse(logging.getLogger("pypdf").isEnabledFor(logging.WARNING))
+        self.assertFalse(logging.getLogger("fontTools").isEnabledFor(logging.WARNING))
+        self.assertTrue(logging.getLogger("scanvault").isEnabledFor(logging.INFO))
+
+    def test_double_verbose_brings_them_back(self):
+        import logging
+
+        from scanvault.cli import _configure_logging
+
+        _configure_logging(verbose=2, quiet=False)
+        self.assertTrue(logging.getLogger("pypdf").isEnabledFor(logging.WARNING))
