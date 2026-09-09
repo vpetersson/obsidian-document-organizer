@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from .config import OcrConfig
+from .util import parse_date
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +91,37 @@ def pdf_text(path: Path, timeout: int = 120) -> str:
         log.warning("pdftotext failed on %s: %s", path.name, result.stderr.strip())
         return ""
     return result.stdout.strip()
+
+
+_PDF_DATE_RE = re.compile(r"D:(\d{4})(\d{2})(\d{2})")
+
+
+def pdf_creation_date(path: Path, timeout: int = 60) -> date | None:
+    """The creation date recorded inside the PDF, if it has one."""
+    try:
+        from pypdf import PdfReader  # type: ignore
+
+        info = PdfReader(str(path)).metadata
+        raw = info.get("/CreationDate") if info else None
+        if isinstance(raw, str):
+            match = _PDF_DATE_RE.search(raw)
+            if match:
+                try:
+                    return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+                except ValueError:
+                    return None
+    except ImportError:
+        pass
+    except Exception as exc:  # pragma: no cover - malformed metadata
+        log.debug("could not read metadata from %s: %s", path.name, exc)
+
+    if shutil.which("pdfinfo") is None:
+        return None
+    result = _run(["pdfinfo", str(path)], timeout)
+    for line in result.stdout.splitlines():
+        if line.startswith("CreationDate:"):
+            return parse_date(line.split(":", 1)[1].strip())
+    return None
 
 
 def page_count(path: Path) -> int | None:

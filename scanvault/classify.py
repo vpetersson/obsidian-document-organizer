@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from .config import Config
+from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
-from .util import parse_date, slugify, truncate_words
+from .util import date_from_filename, file_created_date, parse_date, slugify, truncate_words
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +83,9 @@ class DocumentMeta:
     currency: str = ""
     confidence: float | None = None
     classifier: str = "llm"  # "llm" | "heuristic"
+    # Where document_date came from: document | filename | pdf-metadata |
+    # file-created. Empty when the document is undated.
+    date_source: str = ""
     # PARA bucket: project | area | resource | archive. Scans default to the
     # archive; a human moves a note elsewhere by editing its frontmatter.
     para: str = "archive"
@@ -153,6 +157,37 @@ def from_response(data: dict[str, Any], config: Config, fallback_title: str) -> 
         currency=str(data.get("currency") or "").strip()[:8],
         confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
     )
+
+
+def resolve_date(meta: DocumentMeta, source: Path | None, config: Config) -> DocumentMeta:
+    """Fill in a missing date from the file itself, in the configured order.
+
+    A date printed on the document always wins. Everything else is a guess, so
+    the note records which guess it was.
+    """
+    if meta.document_date:
+        meta.date_source = "document"
+        return meta
+    if source is None:
+        return meta
+
+    finders = {
+        "filename": lambda path: date_from_filename(path.name),
+        "pdf-metadata": pdf_creation_date,
+        "file-created": file_created_date,
+    }
+    for name in config.dates.fallbacks:
+        finder = finders.get(name)
+        if finder is None:
+            log.warning("unknown date fallback %r; skipping", name)
+            continue
+        found = finder(source)
+        if found:
+            meta.document_date = found
+            meta.date_source = name
+            log.debug("%s: date %s taken from %s", source.name, found, name)
+            return meta
+    return meta
 
 
 HEURISTIC_RULES: list[tuple[str, tuple[str, ...]]] = [

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Iterator
 
-from .classify import DocumentMeta, classify
+from .classify import DocumentMeta, classify, resolve_date
 from .config import Config
 from .extract import OcrError, extract
 from .llm import OllamaClient
@@ -117,6 +117,7 @@ def process_file(
         return ProcessResult(path, "failed", error=f"{type(exc).__name__}: {exc}")
 
     meta = classify(extracted.text, config, client, source=path)
+    resolve_date(meta, path, config)
     meta.para = bucket or config.vault.para.default_bucket
     folder = source_folder(path, source_root)
     if folder and config.vault.tag_source_folder:
