@@ -212,6 +212,8 @@ class Vault:
             "category": meta.category,
             "correspondent": meta.correspondent,
             "tags": meta.tags,
+            "document_type": meta.document_type,
+            "context": meta.context,
             "subjects": meta.subjects,
             "reference": meta.reference,
             "amount": meta.amount,
@@ -372,6 +374,8 @@ class Vault:
             title_source=str(data.get("title_source") or "model"),
             correspondent=str(data.get("correspondent") or ""),
             tags=[str(t) for t in tags] if isinstance(tags, list) else [],
+            context=str(data.get("context") or ""),
+            document_type=str(data.get("document_type") or ""),
             subjects=[
                 str(item) for item in (data.get("subjects") or []) if isinstance(item, str)
             ],

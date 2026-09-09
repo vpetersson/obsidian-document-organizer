@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .cache import ClassificationCache
-from .config import GENERIC_CATEGORIES, Config
+from .config import GENERIC_CATEGORIES, WEAK_TAGS, Config
 from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
 from .util import (
@@ -27,11 +27,43 @@ from .util import (
 log = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
-    "You are a meticulous document archivist. You are given the raw OCR text of a "
-    "single scanned document. Extract factual metadata only from that text. Never "
-    "invent a value: if something is not stated, leave it null or empty. Answer "
-    "with a single JSON object and nothing else."
+    "You are a meticulous document archivist filing one person's paperwork - "
+    "household and business, in whatever language it arrives in, most often "
+    "English or Swedish. You are given the raw OCR text of a single scanned "
+    "document, which may be imperfect. Extract factual metadata only from that "
+    "text. Never invent a value: if something is not stated, leave it null or "
+    "empty. Answer with a single JSON object and nothing else."
 )
+
+# One line each, because a bare list of nouns leaves too much to the model's
+# imagination - "Loans" and "Banking" are not obviously different otherwise.
+CATEGORY_HINTS = {
+    "Invoices": "a bill someone sent you or you sent, asking for payment",
+    "Receipts": "proof that something was already paid",
+    "Contracts": "an agreement signed by two parties, including employment contracts and NDAs",
+    "Banking": "bank account statements and card statements",
+    "Accounting": "company books: annual accounts, ledgers, auditor's reports",
+    "Investments": "brokerage, funds, shares, ISK",
+    "Pensions": "pension statements and retirement schemes",
+    "Loans": "mortgages, student loans, credit agreements and their statements",
+    "Taxes": "anything from a tax authority, plus returns and VAT filings",
+    "Insurance": "policies, certificates, renewals and claims",
+    "Medical": "healthcare: appointments, referrals, prescriptions, test results",
+    "Government": "public authorities other than the tax office - councils, agencies, registries",
+    "Identity": "passports, driving licences, residence permits, certificates of birth or marriage",
+    "Legal": "solicitors, courts, wills, powers of attorney",
+    "Employment": "payslips, employer letters, HR paperwork",
+    "Education": "schools, courses, diplomas, admissions",
+    "Property": "a home you own or rent: tenancy, service charges, surveys, deeds",
+    "Vehicle": "a car or bike: registration, inspection, road tax, servicing",
+    "Utilities": "electricity, gas, water, broadband, phone",
+    "Travel": "tickets, bookings, itineraries",
+    "Subscriptions": "memberships and recurring services",
+    "Correspondence": "a letter that is not about any of the above",
+    "Manuals": "instructions and product documentation",
+    "Personal": "private papers that fit nowhere else",
+    "Other": "use only when nothing above applies",
+}
 
 
 def _schema(categories: list[str]) -> dict[str, Any]:
@@ -45,6 +77,8 @@ def _schema(categories: list[str]) -> dict[str, Any]:
             "summary": {"type": "string"},
             "tags": {"type": "array", "items": {"type": "string"}},
             "subjects": {"type": "array", "items": {"type": "string"}},
+            "context": {"type": "string", "enum": ["personal", "business"]},
+            "document_type": {"type": "string"},
             "language": {"type": "string"},
             "reference": {"type": "string"},
             "amount": {"type": "string"},
@@ -58,16 +92,27 @@ def _schema(categories: list[str]) -> dict[str, Any]:
 def build_prompt(
     text: str, config: Config, filename: str | None = None, folder: str | None = None
 ) -> str:
-    categories = ", ".join(config.categories)
+    known = [
+        f"  {name} - {CATEGORY_HINTS[name]}" if name in CATEGORY_HINTS else f"  {name}"
+        for name in config.categories
+    ]
     parts = [
         "Classify the document below.",
         "",
+        "Categories (pick exactly one):",
+        *known,
+        "",
         "Rules:",
-        f"- category MUST be exactly one of: {categories}.",
         "- title: a short human title, no dates, no file extension (max 12 words).",
         "- document_date: the date the document itself carries (issue/statement/"
         "letter date), as YYYY-MM-DD. Not today's date. Null if absent.",
         "- correspondent: the organisation or person the document is from.",
+        "- context: \"business\" if the document belongs to a company - an "
+        "organisation number, a VAT registration, a company name as the customer "
+        "or supplier, payroll or corporate filings - otherwise \"personal\".",
+        "- document_type: what the document is called, in two or three words and "
+        "in the document's own language: mortgage statement, momsdeklaration, "
+        "lönespecifikation, council tax bill, anställningsavtal.",
         "- summary: 1-3 sentences on what this document is and why it matters.",
         "- tags: 4-8 lowercase keywords, dashed, no '#'. Tag what the document IS "
         "(mortgage-statement, council-tax, payslip, insurance-policy, tax-return), "
@@ -137,6 +182,10 @@ class DocumentMeta:
     # Where the title came from: model | text | filename. Worth recording,
     # because a title lifted from a scanner's filename is not a title.
     title_source: str = "model"
+    # "personal" or "business" - a company's paperwork wants finding separately.
+    context: str = ""
+    # What the document is called, in its own words: "momsdeklaration".
+    document_type: str = ""
     # PARA bucket: project | area | resource | archive. Scans default to the
     # archive; a human moves a note elsewhere by editing its frontmatter.
     para: str = "archive"
@@ -242,19 +291,37 @@ def category_from_rules(meta: DocumentMeta, config: Config, text: str = "") -> s
         return meta.category
 
     def first_mapped(tags: list[str]) -> str | None:
-        for tag in tags:
-            candidate = config.tags.tag_categories.get(tag)
-            if candidate and candidate in config.categories:
-                return candidate
+        """The most specific mapped tag among those that fired.
+
+        `tag_categories` is ordered from most to least specific, and a tag that
+        only says something *about* a document never wins over one that says
+        what it is.
+        """
+        fired = set(tags)
+        for weak in (False, True):
+            for tag, candidate in config.tags.tag_categories.items():
+                if (tag in WEAK_TAGS) != weak:
+                    continue
+                if tag in fired and candidate in config.categories:
+                    return candidate
         return None
 
     if meta.category in GENERIC_CATEGORIES:
         # Nothing to lose: anything specific beats "Correspondence".
         return first_mapped(rule_tags(config, *_haystacks(meta, text))) or meta.category
     if meta.classifier != "llm":
-        # A heuristic category is a guess from a word list. A keyword in the
-        # title is a better guess; one buried in the body is not.
-        return first_mapped(rule_tags(config, meta.title)) or meta.category
+        # A heuristic category is a guess from a crude word list. A keyword in
+        # the title beats it outright; one in the body beats it only when the
+        # keyword actually says what the document is - "student-loan" does,
+        # "banking" does not, which is why an invoice quoting an IBAN is still
+        # an invoice.
+        from_title = first_mapped(rule_tags(config, meta.title))
+        if from_title:
+            return from_title
+        specific = [
+            tag for tag in rule_tags(config, *_haystacks(meta, text)) if tag not in WEAK_TAGS
+        ]
+        return first_mapped(specific) or meta.category
     return meta.category
 
 
@@ -268,6 +335,10 @@ def derived_tags(meta: DocumentMeta, config: Config, text: str = "") -> list[str
         derived.append(slugify(meta.correspondent, max_length=40))
     if config.tags.subject_tags:
         derived.extend(slugify(subject, max_length=40) for subject in meta.subjects[:3])
+    if meta.document_type:
+        derived.append(slugify(meta.document_type, max_length=40))
+    if meta.context == "business":
+        derived.append("business")
     derived.extend(rule_tags(config, *_haystacks(meta, text)))
     if meta.classifier != "llm" or (
         meta.confidence is not None and meta.confidence < config.tags.review_below
@@ -334,6 +405,8 @@ def from_response(
         correspondent=correspondent[:120],
         title_source="model" if model_title else "filename",
         subjects=subjects[:5],
+        context=str(data.get("context") or "").strip().lower(),
+        document_type=str(data.get("document_type") or "").strip()[:60],
         language=str(data.get("language") or "").strip(),
         reference=str(data.get("reference") or "").strip()[:80],
         amount=str(data.get("amount") or "").strip()[:40],

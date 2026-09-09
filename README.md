@@ -333,6 +333,44 @@ day_first = true     # 03/04/2024 is the 3rd of April; set false for the US read
 Reorder that list to change precedence, or set it to `[]` to leave undated
 documents in the `undated` folder rather than guessing.
 
+## How good is the classification, and how would you know
+
+`scanvault eval` scores the classifier against a labelled corpus of 39 documents
+— English and Swedish, household and company paperwork — so a change to the
+prompt or the model is measurable rather than a matter of opinion:
+
+```bash
+scanvault eval --no-llm          # rules and heuristics only
+scanvault eval                   # the whole thing, with your model
+scanvault eval --model qwen3.8-flash-next:125b-a6b-q4_K_M
+```
+
+```
+documents      : 39
+category        : 85%
+  english       : 86%
+  swedish       : 83%
+  personal      : 81%
+  business      : 92%
+expected tags   : 100% found
+
+misses:
+  hard-en-loan-letter        category Employment != Loans
+  ...
+```
+
+That 85% is the floor with **no model at all**. Six of the documents are written
+specifically to defeat the keyword rules — a letter about "the money you borrowed
+for your studies" that never says loan or CSN — and the deterministic layer gets
+every one of them wrong. That is the honest split: rules and heuristics handle
+the paperwork that announces itself, and the model earns its place on the rest.
+
+Two caveats worth stating. The corpus is invented, so it contains no documents of
+yours, and it was written by the same person who tuned the rules, which makes it
+a regression test rather than proof of general quality. Point `--corpus` at your
+own labelled JSON — same shape, `id`, `language`, `context`, `category`, `tags`,
+`text` — and the numbers start being about your documents.
+
 ## Tags
 
 A document is only as findable as its tags, so they come from three places and

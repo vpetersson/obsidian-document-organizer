@@ -12,6 +12,7 @@ DEFAULT_CATEGORIES = [
     "Receipts",
     "Contracts",
     "Banking",
+    "Accounting",
     "Investments",
     "Pensions",
     "Loans",
@@ -86,8 +87,8 @@ DEFAULT_TAG_RULES: dict[str, list[str]] = {
         "hmrc", "hm revenue", "revenue & customs", "revenue and customs", "self assessment",
         "irs.gov", "internal revenue service", "skatteverket", "inkomstdeklaration",
         "finanzamt", "agenzia delle entrate", "canada revenue agency", "australian taxation",
-        "tax return", "corporation tax", "vat return", "capital gains", "paye",
-        "slutskattebesked", "skatteuträkning", "moms", "deklaration", "tax credit",
+        "tax return", "corporation tax", "vat return", "capital gains",
+        "slutskattebesked", "skatteuträkning", "deklaration", "tax credit",
         "tax code notice", "p800", "national insurance", "personnummer",
     ],
     "government": [
@@ -167,6 +168,7 @@ DEFAULT_TAG_RULES: dict[str, list[str]] = {
     "legal": [
         "solicitor", "advokat", "power of attorney", "fullmakt", "deed of", "last will",
         "testamente", "court claim", "claim form", "tingsrätt", "settlement agreement",
+        "non-disclosure", "confidentiality agreement", "sekretessavtal", "governed by the laws",
         "bouppteckning", "arvskifte",
     ],
     "travel": [
@@ -182,6 +184,24 @@ DEFAULT_TAG_RULES: dict[str, list[str]] = {
         "proof of purchase", "extended cover",
         "return policy", "kvitto sparas",
     ],
+    "business": [
+        "organisationsnummer", "org.nr", "vat registration", "vat number", "company number",
+        "purchase order", "bill to", "faktura till", "bankgiro", "plusgiro", "leverantörsfaktura",
+        "kundfaktura", "payment terms", "betalningsvillkor", "our reference", "vår referens",
+        "styrelsen", "aktiebolag", "ltd", "plc", "gmbh", "oy", "limited company",
+        "non-disclosure", "mutual nda", "governed by the laws", "notice period",
+        "contract of employment", "anställningsavtal", "employer", "arbetsgivare",
+    ],
+    "accounting": [
+        "årsredovisning", "bokslut", "revisionsberättelse", "balansräkning", "resultaträkning",
+        "annual accounts", "profit and loss", "balance sheet", "ledger", "bookkeeping",
+        "nettoomsättning", "auditor",
+    ],
+    "payroll": [
+        "arbetsgivardeklaration", "arbetsgivaravgifter", "avdragen skatt", "payroll",
+        "employer national insurance", "pension contributions summary",
+    ],
+    "vat": ["momsdeklaration", "utgående moms", "ingående moms", "vat return", "vat due"],
     "charity": ["gift aid", "donation receipt", "gåvobevis", "charity number", "sponsorship"],
     "pets": ["veterinary", "veterinär", "microchip", "pet insurance", "vaccination card"],
     "home-improvement": [
@@ -195,8 +215,16 @@ DEFAULT_TAG_RULES: dict[str, list[str]] = {
 # what it is, the rule wins. Only these buckets are overridable.
 GENERIC_CATEGORIES = ("Other", "Correspondence", "Personal")
 
+# These say something about a document without saying what it is, so they never
+# overrule a category that came from somewhere better.
+WEAK_TAGS = ("banking", "government", "property", "business", "legal")
+
 # Which category a rule tag implies, for exactly that case.
+# Tags that describe a document precisely enough to file it. Order is priority.
 DEFAULT_TAG_CATEGORIES: dict[str, str] = {
+    "vat": "Taxes",
+    "payroll": "Taxes",
+    "accounting": "Accounting",
     "mortgage": "Loans",
     "loan": "Loans",
     "student-loan": "Loans",
@@ -208,7 +236,7 @@ DEFAULT_TAG_CATEGORIES: dict[str, str] = {
     "insurance": "Insurance",
     "utilities": "Utilities",
     "telecoms": "Utilities",
-    "banking": "Banking",
+    "banking": "Banking",  # from here down: too broad to overrule a real guess
     "vehicle": "Vehicle",
     "medical": "Medical",
     "employment": "Employment",
