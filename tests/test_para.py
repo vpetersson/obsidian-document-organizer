@@ -204,8 +204,12 @@ class TestUnmanagedNotes(unittest.TestCase):
         self.assertEqual(report.count("skipped"), 0)
         self.assertEqual(report.count("relocate"), 1)
         organizer_apply(report, self.config, client=client)
-        # It stays in Projects - the bucket comes from where it already lives.
-        self.assertTrue((self.root / "1 Projects/Property/undated/undated Kitchen Plan.md").is_file())
+        # It stays in Projects - the bucket comes from where it already lives -
+        # and the note has no date of its own, so the file's date is used.
+        filed = list((self.root / "1 Projects/Property").rglob("*.md"))
+        self.assertEqual(len(filed), 1)
+        self.assertTrue(filed[0].name.endswith("Kitchen Plan.md"))
+        self.assertNotIn("undated", filed[0].as_posix())
 
 
 class TestLegacyLayoutMigration(unittest.TestCase):

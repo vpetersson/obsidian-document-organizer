@@ -120,6 +120,7 @@ Archive/
 ---
 title: "Acme Invoice INV-1234"
 date: 2024-05-02
+date_source: "document"
 category: "Invoices"
 correspondent: "Acme Ltd"
 tags:
@@ -237,6 +238,31 @@ searchable — in Obsidian *and* in the PDF itself — with:
 scanvault organize --vault ~/Obsidian/Archive --apply
 ```
 
+## Dating a document
+
+The date a document is filed under is the date printed *on* it — the invoice
+date, the statement date, the date at the top of a letter — extracted from the
+text by the model. Plenty of scans do not carry one, so scanvault falls back, in
+this order:
+
+| `date_source` | Where the date came from |
+| --- | --- |
+| `document` | Printed on the document itself. Always preferred. |
+| `filename` | Parsed from the file name — `receipt Mar 5, 2017.pdf`, `statement_03_Jul_2025.pdf`, `2016-09-08 letter.pdf`. Only patterns with a four-digit year count, so an account number cannot pose as a date. |
+| `pdf-metadata` | The `/CreationDate` the scanner wrote into the PDF. |
+| `file-created` | The file's own creation date (modification time where the platform does not record one). |
+
+Every note records which one was used, so a guessed date is never mistaken for a
+real one. To review the guesses in Obsidian, search `date_source: "file-created"`.
+
+```toml
+[dates]
+fallbacks = ["filename", "pdf-metadata", "file-created"]
+```
+
+Reorder that list to change precedence, or set it to `[]` to leave undated
+documents in the `undated` folder rather than guessing.
+
 ## Vault layout (PARA)
 
 The four folders are the PARA framework from *Building a Second Brain*:
@@ -311,6 +337,10 @@ host = "http://localhost:11434"
 model = "qwen3.5:9b"
 num_ctx = 8192
 fallback_to_heuristics = true      # keep filing when ollama is down
+
+[dates]
+# Used only when the document's own text carries no date.
+fallbacks = ["filename", "pdf-metadata", "file-created"]
 
 [vault]
 notes_dir = ""                     # the PARA folders live at the vault root

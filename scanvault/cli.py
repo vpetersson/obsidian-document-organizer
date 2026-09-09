@@ -32,6 +32,10 @@ languages = "eng"       # e.g. "eng+swe"
 min_text_chars = 180
 force = false
 
+[dates]
+# Only used when the document's own text carries no date.
+fallbacks = ["filename", "pdf-metadata", "file-created"]
+
 [llm]
 host = "http://localhost:11434"
 model = "qwen3.5:9b"

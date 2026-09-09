@@ -176,6 +176,7 @@ class Vault:
         frontmatter: dict[str, Any] = {
             "title": meta.title,
             "date": meta.document_date,  # emitted unquoted so Obsidian sees a date
+            "date_source": meta.date_source,
             "category": meta.category,
             "correspondent": meta.correspondent,
             "tags": meta.tags,
@@ -307,6 +308,7 @@ class Vault:
             category=str(data.get("category") or "Other"),
             summary="",
             document_date=parse_date(data.get("date")),
+            date_source=str(data.get("date_source") or ""),
             correspondent=str(data.get("correspondent") or ""),
             tags=[str(t) for t in tags] if isinstance(tags, list) else [],
             reference=str(data.get("reference") or ""),
