@@ -58,6 +58,7 @@ note_path_template = "{para}/{category}/{year}/{date} {name}"
 attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {name}"
 source_action = "move"  # move | copy | leave
 include_text = true
+extracted_text_style = "callout"   # callout (folded) | details | plain
 
 [vault.para]
 projects_dir = "1 Projects"

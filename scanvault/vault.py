@@ -105,6 +105,36 @@ PARA_INDEX_NOTES = {
 }
 
 
+EXTRACTED_HEADING = "Extracted text"
+
+
+def extracted_text_block(text: str, style: str = "callout") -> list[str]:
+    """The OCR text, folded away unless asked for.
+
+    A page of OCR beneath every note buries the summary and the attachment, so
+    the default is a callout Obsidian renders collapsed - the `-` after the type
+    is what folds it. The text is still in the file, so search still finds it.
+    """
+    if style == "plain":
+        return [f"## {EXTRACTED_HEADING}", "", "```text", text, "```", ""]
+    if style == "details":
+        return [
+            "<details>",
+            f"<summary>{EXTRACTED_HEADING}</summary>",
+            "",
+            "```text",
+            text,
+            "```",
+            "",
+            "</details>",
+            "",
+        ]
+    if style != "callout":
+        log.warning("unknown extracted_text_style %r; using a callout", style)
+    quoted = "\n".join(f"> {line}" if line else ">" for line in text.splitlines())
+    return [f"> [!quote]- {EXTRACTED_HEADING}", "> ```text", quoted, "> ```", ""]
+
+
 @dataclass
 class WriteResult:
     note_path: Path
@@ -204,7 +234,7 @@ class Vault:
             body += [f"![[{self.wikilink(attachment)}]]", ""]
         if self.config.vault.include_text and text.strip():
             clipped = text.strip()[: self.config.vault.max_text_chars]
-            body += ["## Extracted text", "", "```text", clipped, "```", ""]
+            body += extracted_text_block(clipped, self.config.vault.extracted_text_style)
         return "\n".join(body)
 
     def write_document(

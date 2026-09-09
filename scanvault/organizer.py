@@ -27,7 +27,39 @@ from .vault import Vault
 
 log = logging.getLogger(__name__)
 
-TEXT_BLOCK_RE = re.compile(r"^## Extracted text\s*\n+```(?:text)?\n(.*?)\n```", re.DOTALL | re.MULTILINE)
+# The plain heading form, and the HTML one, both hold a bare fenced block.
+TEXT_BLOCK_RE = re.compile(
+    r"^(?:## Extracted text|<summary>Extracted text</summary>)\s*\n+```(?:text)?\n(.*?)\n```",
+    re.DOTALL | re.MULTILINE,
+)
+# The callout form quotes every line, fences included.
+CALLOUT_BLOCK_RE = re.compile(
+    r"^> \[!\w+\][-+]? Extracted text\s*\n> ```(?:text)?\n(.*?)\n> ```",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def text_style(body: str) -> str | None:
+    """Which shape a note's extracted-text section was written in."""
+    if CALLOUT_BLOCK_RE.search(body):
+        return "callout"
+    if "<summary>Extracted text</summary>" in body:
+        return "details"
+    if TEXT_BLOCK_RE.search(body):
+        return "plain"
+    return None
+
+
+def embedded_text(body: str) -> str:
+    """The OCR text a note carries, whichever way it was written."""
+    match = CALLOUT_BLOCK_RE.search(body)
+    if match:
+        return "\n".join(
+            line[2:] if line.startswith("> ") else line.lstrip(">")
+            for line in match.group(1).splitlines()
+        )
+    match = TEXT_BLOCK_RE.search(body)
+    return match.group(1) if match else ""
 REQUIRED_KEYS = ("title", "category", "tags")
 
 
@@ -78,9 +110,9 @@ def note_text(vault: Vault, note: Path, frontmatter: dict[str, Any], body: str, 
         text = pdf_text(attachment)
         if len(text) >= config.ocr.min_text_chars:
             return text
-    match = TEXT_BLOCK_RE.search(body)
-    if match:
-        return match.group(1)
+    embedded = embedded_text(body)
+    if embedded:
+        return embedded
     return re.sub(r"^#.*$", "", body, flags=re.MULTILINE).strip()
 
 
@@ -210,8 +242,24 @@ def plan(
                 report.actions.append(
                     Action("rewrite", note, note, reason, meta, frontmatter, text)
                 )
-            else:
-                report.actions.append(Action("noop", note, note, "already filed", meta))
+                continue
+            style = text_style(body)
+            if style is not None and style != config.vault.extracted_text_style:
+                # Only the presentation is out of date, so keep the text and
+                # rewrite the note around it.
+                report.actions.append(
+                    Action(
+                        "rewrite",
+                        note,
+                        note,
+                        f"extracted text is {style}, not {config.vault.extracted_text_style}",
+                        meta,
+                        frontmatter,
+                        embedded_text(body),
+                    )
+                )
+                continue
+            report.actions.append(Action("noop", note, note, "already filed", meta))
             continue
         report.actions.append(Action("relocate", note, target, reason, meta, frontmatter, text))
 
@@ -335,8 +383,7 @@ def _rewrite_note(
     text = action.body_text
     if not text and vault.config.vault.include_text:
         _, body = vault.read_note(action.path)
-        match = TEXT_BLOCK_RE.search(body)
-        text = match.group(1) if match else ""
+        text = embedded_text(body)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
         vault.render_note(meta, text, attachment, extra=preserved), encoding="utf-8"
