@@ -63,7 +63,7 @@ def iter_pdfs(source: Path, recursive: bool = True) -> Iterator[Path]:
 
 
 def source_folder(path: Path, root: Path | None) -> str:
-    """The document's folder relative to `root`, e.g. "WireLoad receipts"."""
+    """The document's folder relative to `root`, e.g. "Work receipts"."""
     if root is None:
         return ""
     try:

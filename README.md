@@ -169,8 +169,8 @@ scanvault organize --vault ~/Obsidian/Archive
 ```
 [dry-run] ocr: 4 Archive/Invoices/2024/2024-05-02 Acme Invoice.md (attachment has no text layer)
 [dry-run] relocate: 4 Archive/Unsorted/old.md -> 4 Archive/Contracts/2022/2022-02-02 Old Note.md (layout drift)
-[dry-run] adopt: WireLoad receipts/Scanbot Mar 5, 2017 11.57 AM.pdf (image-only PDF; will OCR, classify and file under "4 Archive")
-[dry-run] duplicate: WireLoad receipts/Scanbot Mar 5, 2017 11.57 AM - 1.pdf (same content as 4 Archive/Receipts/2017/2017-03-05 Coffee House.md)
+[dry-run] adopt: Work receipts/scan-2017-03-05.pdf (image-only PDF; will OCR, classify and file under "4 Archive")
+[dry-run] duplicate: Work receipts/scan-2017-03-05 - 1.pdf (same content as 4 Archive/Receipts/2017/2017-03-05 Coffee House.md)
 
 1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt (1 of them need OCR), 12 already filed, 1 duplicates, 3 left alone, 0 failed
 3 notes were left alone because scanvault did not write them; pass --include-unmanaged to file those too.
@@ -189,9 +189,9 @@ What each action means:
 | `already filed` | Nothing to do. |
 | `left alone` | A note scanvault did not write — see below. |
 
-Folders are provenance, not clutter: a PDF adopted from `WireLoad receipts/To
-expense/` keeps `source_folder: "WireLoad receipts/To expense"` in its
-frontmatter and picks up `wireload-receipts` and `to-expense` as tags, so the
+Folders are provenance, not clutter: a PDF adopted from `Work receipts/To
+expense/` keeps `source_folder: "Work receipts/To expense"` in its
+frontmatter and picks up `work-receipts` and `to-expense` as tags, so the
 grouping your folders encoded survives the move into PARA. Set
 `tag_source_folder = false` to keep the frontmatter but skip the tags.
 
