@@ -147,5 +147,48 @@ class TestPreviewIsTheDefault(unittest.TestCase):
             self.assertIn("--dry-run", options, f"{name} is missing --dry-run")
 
 
+class TestPlanOutputStaysReadable(unittest.TestCase):
+    """A real vault has hundreds of notes scanvault does not own."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.vault = Path(self.tmp.name) / "vault"
+        run(["-q", "init-vault", "--vault", str(self.vault), "--apply"])
+        for name in ("Holiday ideas", "Boiler service", "Bike maintenance"):
+            note = self.vault / "Scanned/Private" / f"{name}.md"
+            note.parent.mkdir(parents=True, exist_ok=True)
+            note.write_text(f"# {name}\n\nnotes I wrote myself\n")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def organize(self, *extra: str) -> str:
+        return run(["organize", "--vault", str(self.vault), "--no-llm", "-q", *extra])[1]
+
+    def test_skipped_notes_are_counted_not_listed(self):
+        out = self.organize()
+        self.assertNotIn("not a scanvault note", out)
+        self.assertIn("3 left alone", out)
+        self.assertIn("-v to list them", out)
+
+    def test_verbose_lists_them(self):
+        out = self.organize("-v")
+        self.assertIn("Holiday ideas.md (not a scanvault note)", out)
+
+    def test_para_index_notes_are_not_counted_as_filed_documents(self):
+        out = self.organize()
+        self.assertIn("0 already filed", out)
+        self.assertNotIn("PARA index note", out)
+
+    def test_verbose_shows_the_index_notes(self):
+        self.assertIn("PARA index note", self.organize("-v"))
+
+    def test_verbose_works_before_or_after_the_subcommand(self):
+        after = run(["organize", "--vault", str(self.vault), "--no-llm", "-q", "-v"])[1]
+        before = run(["-q", "-v", "organize", "--vault", str(self.vault), "--no-llm"])[1]
+        self.assertIn("not a scanvault note", after)
+        self.assertIn("not a scanvault note", before)
+
+
 if __name__ == "__main__":
     unittest.main()
