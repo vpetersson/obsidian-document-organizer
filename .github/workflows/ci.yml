@@ -31,7 +31,15 @@ jobs:
       - name: Install the OCR toolchain
         # Without these the OCR tests skip themselves, so CI must provide them.
         run: |
-          sudo apt-get update
+          # The runner image carries third-party repositories we never install
+          # from, and a hash mismatch in one of them fails the whole update.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list \
+                     /etc/apt/sources.list.d/microsoft-prod.list
+          for attempt in 1 2 3; do
+            sudo apt-get update && break
+            echo "apt-get update failed (attempt $attempt); retrying"
+            sleep 5
+          done
           sudo apt-get install -y --no-install-recommends \
             ocrmypdf tesseract-ocr tesseract-ocr-eng poppler-utils
 
