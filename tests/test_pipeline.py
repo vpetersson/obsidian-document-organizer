@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scanvault.config import load_config
 from scanvault.extract import OcrError, extract, pdf_text
-from scanvault.pipeline import ingest, iter_pdfs, process_file
+from scanvault.pipeline import ingest, iter_documents, process_file
 from scanvault.state import State
 from scanvault.vault import Vault, parse_frontmatter
 from tests.helpers import StubClient, make_text_pdf
@@ -135,14 +135,14 @@ class TestPipeline(unittest.TestCase):
         self.assertEqual(result.status, "failed")
         self.assertTrue(result.error)
 
-    def test_iter_pdfs_skips_hidden_and_ocr_artifacts(self):
+    def test_iter_documents_skips_hidden_and_ocr_artifacts(self):
         (self.source / ".hidden").mkdir()
         make_text_pdf(self.source / ".hidden" / "x.pdf", ["x"])
         make_text_pdf(self.source / "scan_002.ocr.pdf", ["x"])
         make_text_pdf(self.source / "sub" / "scan_003.pdf", INVOICE_LINES)
-        names = [p.name for p in iter_pdfs(self.source)]
+        names = [p.name for p in iter_documents(self.source)]
         self.assertEqual(names, ["scan_001.pdf", "scan_003.pdf"])
-        self.assertEqual([p.name for p in iter_pdfs(self.source, recursive=False)], ["scan_001.pdf"])
+        self.assertEqual([p.name for p in iter_documents(self.source, recursive=False)], ["scan_001.pdf"])
 
 
 if __name__ == "__main__":

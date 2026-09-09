@@ -196,23 +196,23 @@ class TestLinkedPdfsAreNotLoose(unittest.TestCase):
     def test_embedded_wikilink(self):
         self.add_pdf("3 Resources/manual.pdf")
         self.add_note("3 Resources/Dishwasher.md", "# Dishwasher\n\n![[3 Resources/manual.pdf]]\n")
-        self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
+        self.assertEqual(list(self.vault.iter_loose_documents()), [])
 
     def test_shortest_path_wikilink_without_folders(self):
         self.add_pdf("3 Resources/manual.pdf")
         self.add_note("2 Areas/Home.md", "See [[manual.pdf|the manual]] for details.\n")
-        self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
+        self.assertEqual(list(self.vault.iter_loose_documents()), [])
 
     def test_markdown_link_with_encoded_spaces(self):
         self.add_pdf("3 Resources/user manual.pdf")
         self.add_note("2 Areas/Home.md", "[manual](3%20Resources/user%20manual.pdf)\n")
-        self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
+        self.assertEqual(list(self.vault.iter_loose_documents()), [])
 
     def test_a_genuinely_unreferenced_pdf_is_still_found(self):
         self.add_pdf("3 Resources/manual.pdf")
         self.add_note("3 Resources/Dishwasher.md", "# Dishwasher\n\n![[3 Resources/manual.pdf]]\n")
         orphan = self.add_pdf("Inbox/scan_001.pdf")
-        self.assertEqual(list(self.vault.iter_loose_pdfs()), [orphan])
+        self.assertEqual(list(self.vault.iter_loose_documents()), [orphan])
 
     def test_frontmatter_attachments_still_count(self):
         pdf = self.add_pdf("4 Archive/_attachments/x.pdf")
@@ -220,7 +220,7 @@ class TestLinkedPdfsAreNotLoose(unittest.TestCase):
             "4 Archive/x.md",
             '---\ntitle: "x"\nattachment: "4 Archive/_attachments/x.pdf"\n---\n\nno body link\n',
         )
-        self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
+        self.assertEqual(list(self.vault.iter_loose_documents()), [])
         self.assertTrue(pdf.is_file())
 
 

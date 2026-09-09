@@ -14,6 +14,7 @@ from urllib.parse import unquote
 from . import __version__
 from .classify import DocumentMeta
 from .config import BUCKETS, Config
+from .extract import DOCUMENT_SUFFIXES
 from .util import parse_date, safe_filename, unique_path
 
 log = logging.getLogger(__name__)
@@ -214,24 +215,48 @@ class Vault:
         source_path: Path | None = None,
         extra: dict[str, Any] | None = None,
         dry_run: bool = False,
+        original_path: Path | None = None,
     ) -> WriteResult:
+        """Write the note and its PDF.
+
+        `original_path` is the file the PDF was made from when that was not a
+        PDF itself - an image - and it is kept beside the attachment unless
+        `keep_original_image` says otherwise.
+        """
         note = unique_path(self.note_path(meta))
         attachment = unique_path(self.attachment_path(meta)) if pdf_path else None
         if dry_run:
             return WriteResult(note, attachment)
+        extra = dict(extra or {})
 
         if attachment is not None and pdf_path is not None:
             attachment.parent.mkdir(parents=True, exist_ok=True)
             action = self.config.vault.source_action
             same_file = source_path is not None and pdf_path.resolve() == source_path.resolve()
+            keep_original = (
+                original_path is not None
+                and original_path.exists()
+                and self.config.vault.keep_original_image
+            )
             if action == "move" and same_file:
                 shutil.move(str(pdf_path), attachment)
             else:
                 shutil.copyfile(pdf_path, attachment)
                 if action == "move" and source_path is not None and source_path.exists():
-                    source_path.unlink()
+                    if not keep_original or source_path != original_path:
+                        source_path.unlink()
                 if not same_file and pdf_path.exists() and pdf_path.parent != attachment.parent:
                     pdf_path.unlink(missing_ok=True)  # drop the temporary OCR output
+
+            if keep_original and original_path is not None:
+                # The searchable PDF is what gets filed, but the photo or scan
+                # it came from is the actual original, so it stays with it.
+                kept = unique_path(attachment.with_suffix(original_path.suffix.lower()))
+                if action == "move":
+                    shutil.move(str(original_path), kept)
+                else:
+                    shutil.copyfile(original_path, kept)
+                extra["original"] = self.wikilink(kept)
 
         note.parent.mkdir(parents=True, exist_ok=True)
         note.write_text(self.render_note(meta, text, attachment, extra), encoding="utf-8")
@@ -268,7 +293,7 @@ class Vault:
 
     def _record_link(self, target: str, paths: set[Path], names: set[str]) -> None:
         target = unquote(target.strip())
-        if not target.lower().endswith(".pdf"):
+        if Path(target).suffix.lower() not in DOCUMENT_SUFFIXES:
             return
         # Obsidian's shortest-path links carry no folder, so a bare filename has
         # to count too. Matching too eagerly only means we leave a PDF alone.
@@ -276,8 +301,8 @@ class Vault:
         if "/" in target:
             paths.add((self.root / target).resolve())
 
-    def iter_loose_pdfs(self) -> Iterator[Path]:
-        """PDFs in the vault that no note points at - by frontmatter or by link.
+    def iter_loose_documents(self) -> Iterator[Path]:
+        """Documents in the vault that no note points at - by frontmatter or link.
 
         Notes written by hand embed their PDFs with `![[...]]` rather than an
         `attachment:` key; treating those as loose would file a second copy and
@@ -287,13 +312,16 @@ class Vault:
         linked_names: set[str] = set()
         for note in self.iter_notes():
             data, body = parse_frontmatter(note.read_text(encoding="utf-8", errors="replace"))
-            attachment = data.get("attachment")
-            if isinstance(attachment, str):
-                self._record_link(attachment, linked_paths, linked_names)
+            for key in ("attachment", "original"):
+                value = data.get(key)
+                if isinstance(value, str):
+                    self._record_link(value, linked_paths, linked_names)
             for target in link_targets(body):
                 self._record_link(target, linked_paths, linked_names)
 
-        for path in sorted(self.root.rglob("*.pdf")):
+        for path in sorted(self.root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in DOCUMENT_SUFFIXES:
+                continue
             if any(part.startswith(".") for part in path.relative_to(self.root).parts):
                 continue
             if path.resolve() in linked_paths or path.name in linked_names:

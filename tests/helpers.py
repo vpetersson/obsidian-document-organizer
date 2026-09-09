@@ -122,3 +122,23 @@ def make_scanned_pdf(path: Path, lines: list[str], dpi: int = 150) -> Path:
         jpeg = sorted(tmpdir.glob("page-*.jpg"))[0].read_bytes()
     width, height = jpeg_dimensions(jpeg)
     return make_image_pdf(path, jpeg, width, height)
+
+
+def make_scan_image(path: Path, lines: list[str], dpi: int = 150, fmt: str = "jpeg") -> Path:
+    """A photo-of-a-document fixture: render text, rasterise it to an image."""
+    import subprocess
+    import tempfile
+
+    suffix = {"jpeg": ".jpg", "png": ".png"}[fmt]
+    with tempfile.TemporaryDirectory() as tmp:
+        tmpdir = Path(tmp)
+        make_text_pdf(tmpdir / "source.pdf", lines)
+        subprocess.run(
+            ["pdftoppm", f"-{fmt}", "-r", str(dpi), str(tmpdir / "source.pdf"), str(tmpdir / "page")],
+            check=True,
+            capture_output=True,
+        )
+        rendered = sorted(tmpdir.glob(f"page-*{suffix}"))[0]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(rendered.read_bytes())
+    return path

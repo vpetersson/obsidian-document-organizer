@@ -10,11 +10,11 @@ from pathlib import Path
 
 from . import __version__
 from .config import CONFIG_FILENAME, Config, find_config, load_config
-from .extract import available_backend, extract, pdf_text
+from .extract import _image_converter, available_backend, extract, pdf_text
 from .llm import LlmError, OllamaClient, is_local_host
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
-from .pipeline import ingest, iter_pdfs, watch
+from .pipeline import ingest, iter_documents, watch
 from .vault import Vault
 
 log = logging.getLogger("scanvault")
@@ -29,6 +29,7 @@ language_hint = "English"
 [ocr]
 backend = "auto"        # auto | ocrmypdf | tesseract | none
 languages = "eng"       # e.g. "eng+swe"
+image_dpi = 300         # assumed resolution when filing a bare image
 min_text_chars = 180
 force = false
 
@@ -153,9 +154,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     config = _build_config(args)
     if config.source_dir is None or config.vault_dir is None:
         raise SystemExit("both --source and --vault are required (or set them in the config file)")
-    paths = list(iter_pdfs(config.source_dir, recursive=not args.no_recursive))
+    paths = list(iter_documents(config.source_dir, recursive=not args.no_recursive))
     if not paths:
-        print(f"No PDFs found in {config.source_dir}")
+        print(f"No documents found in {config.source_dir}")
         return 0
     preview = is_preview(args)
     report = ingest(
@@ -210,7 +211,7 @@ def cmd_ocr(args: argparse.Namespace) -> int:
     failures = 0
     for source in args.paths:
         path = Path(source).expanduser()
-        for pdf in iter_pdfs(path):
+        for pdf in iter_documents(path):
             if preview:
                 chars = len(pdf_text(pdf))
                 if chars < config.ocr.searchable_min_chars:
@@ -313,6 +314,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     for tool in ("ocrmypdf", "tesseract", "pdftotext", "pdftoppm", "pdfunite"):
         found = shutil.which(tool)
         print(f"{tool:12s}: {found or 'MISSING'}")
+    converter = _image_converter()
+    print(
+        f"image conv  : {converter or 'MISSING'}"
+        + ("" if converter else " (only needed for HEIC/WEBP; install ImageMagick)")
+    )
     try:
         print(f"ocr backend : {available_backend(config.ocr)}")
     except Exception as exc:

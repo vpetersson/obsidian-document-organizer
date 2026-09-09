@@ -10,7 +10,9 @@ default. No account, no cloud service, no telemetry, and your documents stay
 files you own in a folder you chose. The package and CLI are called `scanvault`.
 
 * **Phase 1 — OCR.** Every incoming PDF is checked for a text layer; image-only
-  scans are run through OCR and re-saved as a searchable PDF.
+  scans are run through OCR and re-saved as a searchable PDF. Photos —
+  `.jpg`, `.png`, `.tiff`, `.heic` and friends — are converted to a searchable
+  PDF the same way, so a picture of a receipt is a document like any other.
 * **Phase 2 — Organize.** The text goes to a local ollama
   model (default `qwen3.5:9b`), which returns a title, category, date,
   correspondent, tags and a summary. scanvault writes an Obsidian note with that
@@ -372,6 +374,29 @@ max_tags = 12
 
 Existing notes pick this up with `organize --reclassify --apply`.
 
+## Photos and other image formats
+
+A phone photo of a receipt, a `.png` from a scanning app, a `.tiff` from a flatbed:
+`ingest` and `organize` treat all of them as documents. Each one is OCR'd into a
+searchable PDF, and that PDF is what gets filed, classified and named — exactly
+as if it had arrived as a PDF:
+
+```
+4 Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md
+4 Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf
+4 Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.jpg
+```
+
+The photo it came from is kept next to the PDF and recorded as `original:` in the
+note, because a conversion is not a replacement. Set `keep_original_image = false`
+under `[vault]` if you would rather only keep the PDF.
+
+Recognised: `.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`, `.bmp`, `.webp`, `.heic`,
+`.heif`. The first five go straight through OCR; HEIC and WEBP are converted
+first with ImageMagick (or `heif-convert`, or `sips` on macOS), and `scanvault
+doctor` tells you whether you have one of those. An image carries no page size,
+so `image_dpi` under `[ocr]` says what resolution to assume — 300 by default.
+
 ## Naming a document
 
 A scan arrives called `SwiftScan Feb 7, 2021 11.45 AM.pdf` or `Scan 10.pdf`.
@@ -465,6 +490,7 @@ language_hint = "English"          # language for generated titles/summaries
 [ocr]
 backend = "auto"                   # auto | ocrmypdf | tesseract | none
 languages = "eng+swe"
+image_dpi = 300                    # assumed resolution for bare images
 min_text_chars = 180               # a new scan with less text than this is OCR'd
 searchable_min_chars = 10          # a vault PDF with less text than this has no text layer
 force = false                      # re-OCR even when a text layer exists
@@ -485,6 +511,7 @@ attachments_dir = ""
 note_path_template = "{para}/{category}/{year}/{date} {name}"
 attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {name}"
 source_action = "move"             # move | copy | leave
+keep_original_image = true         # keep the photo an image document came from
 include_text = true
 tag_source_folder = true           # turn the folder a document came from into tags
 

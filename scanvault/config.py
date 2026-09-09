@@ -44,6 +44,8 @@ class OcrConfig:
     searchable_min_chars: int = 10
     # Re-OCR even when a text layer is present.
     force: bool = False
+    # Assumed resolution when a bare image carries none.
+    image_dpi: int = 300
     rotate_pages: bool = True
     deskew: bool = True
     optimize: int = 1
@@ -180,6 +182,8 @@ class VaultConfig:
     # Turn the folder a document came from into tags, so an existing folder
     # tree ("Work receipts/To expense") survives the move into PARA.
     tag_source_folder: bool = True
+    # An image is filed as a searchable PDF; keep the picture it came from too.
+    keep_original_image: bool = True
     # Embed the OCR text in the note so Obsidian search can reach it.
     include_text: bool = True
     max_text_chars: int = 20000

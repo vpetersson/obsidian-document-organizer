@@ -18,7 +18,7 @@ from typing import Any
 from .cache import ClassificationCache
 from .classify import DocumentMeta, classify, resolve_date
 from .config import BUCKETS, Config
-from .extract import OcrError, available_backend, extract, needs_password, pdf_text
+from .extract import OcrError, available_backend, extract, is_image, needs_password, pdf_text
 from .llm import OllamaClient
 from .pipeline import process_file
 from .state import State
@@ -218,12 +218,14 @@ def plan(
     if adopt:
         known_hashes = State(config.state_root).documents
         if classified:
-            log.info("classified %d notes; looking for PDFs no note points at", classified)
-        for index, pdf in enumerate(vault.iter_loose_pdfs(), start=1):
+            log.info(
+                "classified %d notes; looking for documents no note points at", classified
+            )
+        for index, pdf in enumerate(vault.iter_loose_documents(), start=1):
             if index % 50 == 0:
                 # A vault of several hundred PDFs takes a while to hash and
                 # probe; say something rather than looking hung.
-                log.info("scanned %d PDFs...", index)
+                log.info("scanned %d documents...", index)
             filed = known_hashes.get(sha256_file(pdf))
             if filed:
                 # Same bytes as a document already in the vault: a second copy
@@ -236,6 +238,19 @@ def plan(
                 vault.bucket_from_path(pdf) or config.vault.para.default_bucket
             )
             action = Action("adopt", pdf, None, "")
+            if is_image(pdf):
+                action.needs_ocr = True
+                kind = pdf.suffix.lstrip(".").lower()
+                action.reason = (
+                    f"{kind} image; will be converted to a searchable PDF, classified "
+                    f'and filed under "{destination}"'
+                )
+                if backend == "none":
+                    action.reason = (
+                        f"{kind} image; NO OCR BACKEND INSTALLED, so it cannot be read"
+                    )
+                report.actions.append(action)
+                continue
             if needs_password(pdf):
                 action.reason = (
                     "password-protected PDF; neither text extraction nor OCR can read "
