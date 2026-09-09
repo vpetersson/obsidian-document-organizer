@@ -11,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from .config import CONFIG_FILENAME, Config, find_config, load_config
 from .extract import available_backend, extract, pdf_text
-from .llm import LlmError, OllamaClient, host_scope
+from .llm import LlmError, OllamaClient, is_local_host
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
 from .pipeline import ingest, iter_pdfs, watch
@@ -33,8 +33,7 @@ min_text_chars = 180
 force = false
 
 [llm]
-host = "http://localhost:11434"   # this machine or your own LAN; public hosts need the flag below
-allow_public_host = false
+host = "http://localhost:11434"   # any ollama endpoint; the default keeps everything local
 model = "qwen3.5:9b"
 temperature = 0.0
 num_ctx = 8192
@@ -126,10 +125,7 @@ def _client(args: argparse.Namespace, config: Config) -> OllamaClient | None:
     if getattr(args, "no_llm", False):
         log.info("--no-llm: using heuristic classification")
         return None
-    try:
-        client = OllamaClient(config.llm)
-    except LlmError as exc:
-        raise SystemExit(str(exc)) from exc
+    client = OllamaClient(config.llm)
     if not client.available():
         if not config.llm.fallback_to_heuristics:
             raise SystemExit(f"ollama is not reachable at {config.llm.host}")
@@ -311,15 +307,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except ImportError:
         print("pypdf       : not installed (optional, falls back to pdftotext)")
 
-    try:
-        client = OllamaClient(config.llm)
-    except LlmError as exc:
-        print(f"ollama      : REFUSED {exc}")
-        return 0
-    where = {
-        "machine": "on this machine",
-        "network": "on your network - text leaves this machine, not your network",
-    }.get(host_scope(config.llm.host), "PUBLIC INTERNET - text leaves your network")
+    client = OllamaClient(config.llm)
+    where = (
+        "this machine"
+        if is_local_host(config.llm.host)
+        else "not this machine - document text is sent there"
+    )
     print(f"model host  : {config.llm.host} ({where})")
     try:
         models = client.list_models()

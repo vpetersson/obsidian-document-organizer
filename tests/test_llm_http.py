@@ -129,63 +129,21 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestHostScope(unittest.TestCase):
-    """Your own machine and your own network are fine; the internet is not."""
+class TestHostIsInformationOnly(unittest.TestCase):
+    """Where ollama runs is the user's choice; we only report it."""
 
-    def scope(self, url: str, resolved: list[str] | None = None) -> str:
-        from scanvault.llm import host_scope
+    def test_local_hosts_are_recognised(self):
+        from scanvault.llm import is_local_host
 
-        return host_scope(url, resolver=lambda _: resolved or [])
-
-    def test_this_machine(self):
         for url in ("http://localhost:11434", "http://127.0.0.1:11434", "http://[::1]:11434"):
-            self.assertEqual(self.scope(url), "machine", url)
+            self.assertTrue(is_local_host(url), url)
+        for url in ("http://192.168.1.50:11434", "http://ollama.example.com:11434"):
+            self.assertFalse(is_local_host(url), url)
 
-    def test_a_box_on_the_lan(self):
-        for url in (
+    def test_any_host_is_accepted(self):
+        for host in (
+            "http://localhost:11434",
             "http://192.168.1.50:11434",
-            "http://10.0.0.5:11434",
-            "http://172.20.1.4:11434",
-            "http://[fd00::1]:11434",
-            "http://169.254.10.10:11434",
+            "http://ollama.example.com:11434",
         ):
-            self.assertEqual(self.scope(url), "network", url)
-
-    def test_lan_hostnames_need_no_lookup(self):
-        for url in ("http://ollama.local:11434", "http://nas.lan:11434", "http://box.internal"):
-            self.assertEqual(self.scope(url), "network", url)
-
-    def test_a_hostname_is_judged_by_what_it_resolves_to(self):
-        self.assertEqual(self.scope("http://ollama.example.com", ["192.168.1.50"]), "network")
-        self.assertEqual(self.scope("http://ollama.example.com", ["93.184.216.34"]), "public")
-
-    def test_a_name_that_does_not_resolve_is_treated_as_public(self):
-        self.assertEqual(self.scope("http://nowhere.example", []), "public")
-
-    def test_a_mix_of_public_and_private_answers_is_public(self):
-        self.assertEqual(self.scope("http://split.example", ["192.168.1.5", "8.8.8.8"]), "public")
-
-    def test_public_addresses(self):
-        self.assertEqual(self.scope("http://8.8.8.8:11434"), "public")
-
-
-class TestPublicHostsNeedPermission(unittest.TestCase):
-    def test_a_lan_host_is_allowed_without_asking(self):
-        client = OllamaClient(LlmConfig(host="http://192.168.1.50:11434"))
-        self.assertEqual(client.host, "http://192.168.1.50:11434")
-
-    def test_localhost_is_allowed_without_asking(self):
-        self.assertEqual(
-            OllamaClient(LlmConfig(host="http://localhost:11434")).host, "http://localhost:11434"
-        )
-
-    def test_a_public_host_is_refused_by_default(self):
-        with self.assertRaises(LlmError) as caught:
-            OllamaClient(LlmConfig(host="http://8.8.8.8:11434"))
-        message = str(caught.exception)
-        self.assertIn("public internet", message)
-        self.assertIn("allow_public_host", message)
-
-    def test_a_public_host_works_when_asked_for(self):
-        client = OllamaClient(LlmConfig(host="http://8.8.8.8:11434", allow_public_host=True))
-        self.assertEqual(client.host, "http://8.8.8.8:11434")
+            self.assertEqual(OllamaClient(LlmConfig(host=host)).host, host)

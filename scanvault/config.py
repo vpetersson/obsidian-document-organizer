@@ -54,9 +54,6 @@ class OcrConfig:
 @dataclass
 class LlmConfig:
     host: str = "http://localhost:11434"
-    # This machine and your own network are fine; sending document text out to
-    # the public internet has to be asked for.
-    allow_public_host: bool = False
     model: str = "qwen3.5:9b"
     # Fall back to heuristics instead of failing when ollama is unreachable.
     fallback_to_heuristics: bool = True

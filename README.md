@@ -3,11 +3,11 @@
 [![CI](https://github.com/vpetersson/obsidian-document-organizer/actions/workflows/ci.yml/badge.svg)](https://github.com/vpetersson/obsidian-document-organizer/actions/workflows/ci.yml)
 
 Private document management for scanned paper. Point it at the folder your
-scanner writes to and it gives you an organized Obsidian vault of searchable
-PDFs and notes — **without any of it leaving your machine**. No account, no
-cloud service, no telemetry: OCR runs locally, classification runs against
-[ollama](https://ollama.com) on localhost, and your documents stay files you own
-in a folder you chose. The package and CLI are called `scanvault`.
+scanner writes to and it gives you an organized Obsidian vault of searchable PDFs
+and notes. **All of it can run on your own machine** — OCR is local software and
+the classifier is [ollama](https://ollama.com), pointed at `localhost` by
+default. No account, no cloud service, no telemetry, and your documents stay
+files you own in a folder you chose. The package and CLI are called `scanvault`.
 
 * **Phase 1 — OCR.** Every incoming PDF is checked for a text layer; image-only
   scans are run through OCR and re-saved as a searchable PDF.
@@ -34,26 +34,24 @@ The point of running this locally is that documents like these — invoices,
 medical letters, bank statements, anything with your address on it — are exactly
 what you do not want in someone else's system.
 
-**What leaves your network: nothing.** There is one kind of outbound request in
-the whole codebase, in `scanvault/llm.py`, and it goes to the ollama host you
-configured. Classifying a document means sending its text there, so where that
-host lives is the one thing worth checking:
+**All of it can run on your own machine, and by default it does.** OCR is local
+software. The classifier is whatever ollama endpoint you configure, and the
+default is `http://localhost:11434` — so out of the box, with a model pulled,
+you can disconnect the machine from the network entirely and the whole pipeline
+still works.
 
-| Host | Treated as | Needs permission |
-| --- | --- | --- |
-| `localhost`, `127.0.0.1`, `[::1]` | this machine | no |
-| `192.168.x`, `10.x`, `172.16-31.x`, `fd00::/8`, link-local | your own network | no |
-| `ollama.local`, `nas.lan`, `box.internal` | your own network | no |
-| a name that resolves onto the public internet | public | yes |
+There is exactly one outbound request in the codebase, in `scanvault/llm.py`, and
+it goes to that ollama host. Where you point it is your call: the machine you are
+on, the box with the GPU in the next room, or something further away. Classifying
+a document means sending its text to whatever you chose, and `scanvault doctor`
+tells you which it is:
 
-A model server on another box in the house is still your own hardware, so it
-needs no ceremony. A public address is refused unless you set
-`allow_public_host = true` under `[llm]`. `scanvault doctor` prints which of the
-three it is.
+```
+model host  : http://localhost:11434 (this machine)
+```
 
-There is no analytics, no update check, no crash reporting, and nothing is
-uploaded — not the PDFs, not the OCR text, not the metadata. Disconnect the
-machine from the network and everything except pulling a model still works.
+Nothing else phones anywhere. No analytics, no update check, no crash reporting,
+no account — not the PDFs, not the OCR text, not the metadata.
 
 **What runs locally:** OCR through `ocrmypdf`/`tesseract`, text extraction
 through poppler or pypdf, classification through ollama, and the filing logic
@@ -346,8 +344,7 @@ searchable_min_chars = 10          # a vault PDF with less text than this has no
 force = false                      # re-OCR even when a text layer exists
 
 [llm]
-host = "http://localhost:11434"   # this machine or your own LAN; public hosts need the flag
-allow_public_host = false
+host = "http://localhost:11434"   # any ollama endpoint; the default keeps it all local
 model = "qwen3.5:9b"
 num_ctx = 8192
 fallback_to_heuristics = true      # keep filing when ollama is down
