@@ -56,12 +56,12 @@ class TestVault(unittest.TestCase):
         note = self.vault.note_path(meta())
         self.assertEqual(
             note.relative_to(self.root).as_posix(),
-            "Documents/Invoices/2024/2024-05-02 Acme Invoice.md",
+            "4 Archive/Invoices/2024/2024-05-02 Acme Invoice.md",
         )
         attachment = self.vault.attachment_path(meta())
         self.assertEqual(
             attachment.relative_to(self.root).as_posix(),
-            "Attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf",
+            "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf",
         )
 
     def test_undated_documents_get_their_own_folder(self):
@@ -77,7 +77,7 @@ class TestVault(unittest.TestCase):
         self.config.vault.note_path_template = "{correspondent}/{year}-{month} {slug}"
         note = self.vault.note_path(meta())
         self.assertEqual(
-            note.relative_to(self.root).as_posix(), "Documents/Acme Ltd/2024-05 acme-invoice.md"
+            note.relative_to(self.root).as_posix(), "Acme Ltd/2024-05 acme-invoice.md"
         )
 
     def test_unknown_placeholder_raises(self):
@@ -100,7 +100,7 @@ class TestVault(unittest.TestCase):
         self.assertIn("date: 2024-05-02", content)
         self.assertIn("  - invoices", content)
         self.assertIn('source_hash: "abc"', content)
-        self.assertIn("![[Attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf]]", content)
+        self.assertIn("![[4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf]]", content)
         self.assertIn("OCR TEXT HERE", content)
 
     def test_copy_keeps_the_original(self):

@@ -14,6 +14,10 @@ CLI are called `scanvault`.
   it adopts loose PDFs and re-files notes whose metadata is missing or whose
   location no longer matches the configured layout.
 
+The vault is laid out as a PARA ("Second Brain") structure, with the archive as
+its cornerstone — scanned paper is reference material, so that is where it
+lands. See [Vault layout](#vault-layout-para).
+
 No Python dependencies — the standard library only. External tools (OCR engine,
 ollama) are detected at runtime and reported by `scanvault doctor`.
 
@@ -66,6 +70,9 @@ scanvault doctor --vault ~/Obsidian/Archive --source ~/Scans/inbox
 Prefix any of these with `uv run` if you did not `uv tool install` the CLI.
 
 ```bash
+# create the PARA folders (optional; ingest does it too)
+scanvault init-vault --vault ~/Obsidian/Archive
+
 # see what would happen, change nothing
 scanvault ingest --source ~/Scans/inbox --vault ~/Obsidian/Archive --dry-run
 
@@ -91,8 +98,12 @@ scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
 
 ```
 Archive/
-├── Documents/Invoices/2024/2024-05-02 Acme Invoice INV-1234.md
-├── Attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf
+├── 1 Projects/
+├── 2 Areas/
+├── 3 Resources/
+├── 4 Archive/
+│   ├── Invoices/2024/2024-05-02 Acme Invoice INV-1234.md
+│   └── _attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf
 └── .scanvault/index.json
 ```
 
@@ -110,19 +121,20 @@ reference: "INV-1234"
 amount: "120.00"
 currency: "EUR"
 confidence: 0.95
+para: "archive"
 classifier: "llm"
 source_file: "scan_001.pdf"
 source_hash: "9f2c…"
 ocr: "ocrmypdf"
 pages: 2
-attachment: "Attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf"
+attachment: "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf"
 ---
 
 # Acme Invoice INV-1234
 
 Invoice INV-1234 from Acme Ltd for 120.00 EUR.
 
-![[Attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf]]
+![[4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf]]
 
 ## Extracted text
 
@@ -135,6 +147,48 @@ INVOICE 2024-05-02
 
 The extracted text is embedded so Obsidian's own search finds documents by their
 contents; turn it off with `include_text = false`.
+
+## Vault layout (PARA)
+
+The four folders are the PARA framework from *Building a Second Brain*:
+
+| Folder | What belongs there |
+| --- | --- |
+| `1 Projects` | Short-term efforts with a goal and a finish line |
+| `2 Areas` | Ongoing responsibilities you maintain over time |
+| `3 Resources` | Topics and reference material you are not actively working |
+| `4 Archive` | Everything inactive — **and the default home for every scan** |
+
+`scanvault init-vault --vault ~/Obsidian/Archive` creates the four folders with a
+short index note in each; `ingest` also creates them on first run. Both are
+idempotent and never overwrite an existing note.
+
+Documents move between buckets in two ways, and the organizer honours both:
+
+* **Frontmatter.** Set `para: project` (or `area`, `resource`, `archive`) in a
+  note and the next `organize --apply` moves the note *and its PDF* into that
+  folder.
+* **Location.** Drag a note into `1 Projects/` in Obsidian and leave the
+  frontmatter alone — the organizer reads the bucket from where the note now
+  lives instead of dragging it back to the archive.
+
+Notes that scanvault did not write are left alone entirely: your own project and
+area notes are never moved, even though they live in the same vault. Pass
+`--include-unmanaged` to `organize` if you *do* want hand-made notes filed by the
+same rules.
+
+### Migrating a vault from 0.1
+
+0.1 filed everything under `Documents/` and `Attachments/`. To move an existing
+vault into the PARA layout:
+
+```bash
+scanvault organize --vault ~/Obsidian/Archive          # dry run, shows every move
+scanvault organize --vault ~/Obsidian/Archive --apply
+```
+
+Notes and attachments move together, links are rewritten, and emptied folders are
+pruned.
 
 ## Configuration
 
@@ -162,15 +216,24 @@ num_ctx = 8192
 fallback_to_heuristics = true      # keep filing when ollama is down
 
 [vault]
-notes_dir = "Documents"
-attachments_dir = "Attachments"
-note_path_template = "{category}/{year}/{date} {title}"
-attachment_path_template = "{category}/{year}/{date} {title}"
+notes_dir = ""                     # the PARA folders live at the vault root
+attachments_dir = ""
+note_path_template = "{para}/{category}/{year}/{date} {title}"
+attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {title}"
 source_action = "move"             # move | copy | leave
 include_text = true
+
+[vault.para]
+projects_dir = "1 Projects"
+areas_dir = "2 Areas"
+resources_dir = "3 Resources"
+archive_dir = "4 Archive"
+default_bucket = "archive"         # where a new scan goes
 ```
 
-Template placeholders: `{category} {year} {month} {date} {title} {slug} {correspondent}`.
+Template placeholders: `{para} {category} {year} {month} {date} {title} {slug} {correspondent}`,
+where `{para}` is the folder for the note's bucket. Drop `{para}` from the
+templates for a flat, non-PARA vault.
 Undated documents get `undated` for `{date}`/`{year}`, so nothing is silently
 misfiled. Filenames are sanitised, and a name collision appends `-2`, `-3`, …
 

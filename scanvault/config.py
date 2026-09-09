@@ -61,12 +61,51 @@ class LlmConfig:
 
 
 @dataclass
+class ParaConfig:
+    """PARA ("Second Brain") top-level folders.
+
+    Scanned documents are reference material, so they land in the archive
+    unless a note says otherwise via its `para:` frontmatter key.
+    """
+
+    projects_dir: str = "1 Projects"
+    areas_dir: str = "2 Areas"
+    resources_dir: str = "3 Resources"
+    archive_dir: str = "4 Archive"
+    default_bucket: str = "archive"
+
+    def folder(self, bucket: str) -> str:
+        return {
+            "project": self.projects_dir,
+            "area": self.areas_dir,
+            "resource": self.resources_dir,
+            "archive": self.archive_dir,
+        }.get(bucket, self.archive_dir)
+
+    def buckets(self) -> dict[str, str]:
+        """bucket name -> folder, in PARA order."""
+        return {
+            "project": self.projects_dir,
+            "area": self.areas_dir,
+            "resource": self.resources_dir,
+            "archive": self.archive_dir,
+        }
+
+
+BUCKETS = ("project", "area", "resource", "archive")
+
+
+@dataclass
 class VaultConfig:
-    notes_dir: str = "Documents"
-    attachments_dir: str = "Attachments"
-    # Available placeholders: category, year, month, date, title, slug, correspondent
-    note_path_template: str = "{category}/{year}/{date} {title}"
-    attachment_path_template: str = "{category}/{year}/{date} {title}"
+    # The PARA folders sit at the vault root, so the templates carry the
+    # full path from there.
+    notes_dir: str = ""
+    attachments_dir: str = ""
+    para: ParaConfig = field(default_factory=ParaConfig)
+    # Available placeholders: para, category, year, month, date, title, slug,
+    # correspondent
+    note_path_template: str = "{para}/{category}/{year}/{date} {title}"
+    attachment_path_template: str = "{para}/_attachments/{category}/{year}/{date} {title}"
     # move | copy | leave
     source_action: str = "move"
     # Extra tags added to every note.
