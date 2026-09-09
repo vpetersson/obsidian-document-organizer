@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -16,6 +18,17 @@ log = logging.getLogger(__name__)
 
 class LlmError(RuntimeError):
     """Raised when ollama is unreachable or returns something unusable."""
+
+
+def is_local_host(url: str) -> bool:
+    """True when the URL points at this machine. Informational only."""
+    hostname = (urllib.parse.urlparse(url).hostname or "").lower()
+    if hostname in ("localhost", "localhost.localdomain"):
+        return True
+    try:
+        return ipaddress.ip_address(hostname).is_loopback
+    except ValueError:
+        return False
 
 
 class OllamaClient:

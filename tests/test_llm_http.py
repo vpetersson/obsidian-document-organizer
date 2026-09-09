@@ -127,3 +127,23 @@ class TestOllamaClient(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHostIsInformationOnly(unittest.TestCase):
+    """Where ollama runs is the user's choice; we only report it."""
+
+    def test_local_hosts_are_recognised(self):
+        from scanvault.llm import is_local_host
+
+        for url in ("http://localhost:11434", "http://127.0.0.1:11434", "http://[::1]:11434"):
+            self.assertTrue(is_local_host(url), url)
+        for url in ("http://192.168.1.50:11434", "http://ollama.example.com:11434"):
+            self.assertFalse(is_local_host(url), url)
+
+    def test_any_host_is_accepted(self):
+        for host in (
+            "http://localhost:11434",
+            "http://192.168.1.50:11434",
+            "http://ollama.example.com:11434",
+        ):
+            self.assertEqual(OllamaClient(LlmConfig(host=host)).host, host)
