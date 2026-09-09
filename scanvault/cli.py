@@ -22,7 +22,7 @@ log = logging.getLogger("scanvault")
 SAMPLE_CONFIG = """# scanvault configuration
 source_dir = "~/Scans/inbox"
 vault_dir = "~/Obsidian/Archive"
-language_hint = "English"
+language_hint = "auto"   # or a language name, to force titles and summaries into it
 
 # categories = ["Invoices", "Receipts", "Contracts", "Other"]
 

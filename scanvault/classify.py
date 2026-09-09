@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from difflib import SequenceMatcher
 from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import date
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .cache import ClassificationCache
-from .config import Config
+from .config import GENERIC_CATEGORIES, Config
 from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
 from .util import (
@@ -81,7 +82,11 @@ def build_prompt(
         "- reference: invoice/account/case number if present.",
         "- amount + currency: the document's headline total, if it has one.",
         "- confidence: 0.0-1.0, how sure you are about category and title.",
-        f"- Write title and summary in {config.language_hint}.",
+        (
+            "- Write the title and summary in the language the document is written in."
+            if config.language_hint.lower() in ("auto", "document", "")
+            else f"- Write title and summary in {config.language_hint}."
+        ),
         "",
     ]
     if filename:
@@ -89,8 +94,25 @@ def build_prompt(
     if folder:
         # Where someone filed it by hand is a strong hint about what it is.
         parts.append(f"Folder it was found in: {folder}")
-    parts += ["Document text:", '"""', truncate_words(text, config.llm.max_chars), '"""']
+    parts += ["Document text:", '"""', document_excerpt(text, config), '"""']
     return "\n".join(parts)
+
+
+def document_excerpt(text: str, config: Config) -> str:
+    """The part of the document the model gets to see.
+
+    Long documents are sampled from both ends: what a document is tends to be
+    stated at the top, and totals, dates and signatures live at the bottom. The
+    budget is also capped against `num_ctx`, so a small context window truncates
+    the document rather than silently eating the instructions above it.
+    """
+    # Roughly 3.5 characters per token, less what the prompt and the answer need.
+    budget = min(config.llm.max_chars, max(1000, int(config.llm.num_ctx * 3.5) - 4000))
+    if len(text) <= budget:
+        return text
+    head = int(budget * 0.7)
+    tail = budget - head
+    return f"{truncate_words(text[:head], head)}\n[...]\n{text[-tail:]}"
 
 
 @dataclass
@@ -188,7 +210,7 @@ def rule_tags(config: Config, *haystacks: str) -> list[str]:
     "Correspondence", and that is exactly the search someone will run.
     """
     text = "\n".join(part for part in haystacks if part)
-    frozen = tuple((tag, tuple(keywords)) for tag, keywords in config.tags.rules.items())
+    frozen = tuple((tag, tuple(keywords)) for tag, keywords in config.tags.all_rules().items())
     return [tag for tag, pattern in _compiled_rules(frozen) if pattern.search(text)]
 
 
@@ -204,6 +226,38 @@ def _clean_tags(raw: Any, config: Config, meta_extra: list[str]) -> list[str]:
     return tags[: max(len(config.tags.base) + len(meta_extra), config.tags.max_tags)]
 
 
+def _haystacks(meta: DocumentMeta, text: str) -> tuple[str, ...]:
+    return (meta.title, meta.correspondent, meta.summary, text[:4000])
+
+
+def category_from_rules(meta: DocumentMeta, config: Config, text: str = "") -> str:
+    """Let a keyword rule name the category when nothing better is on offer.
+
+    "Mortgage Charges Tariff" filed as Correspondence is technically not wrong
+    and completely useless - the word is in the title. But an invoice that
+    happens to quote an IBAN is still an invoice, so a keyword found only in the
+    body never overrules a category that came from the model.
+    """
+    if not config.tags.rules_set_category:
+        return meta.category
+
+    def first_mapped(tags: list[str]) -> str | None:
+        for tag in tags:
+            candidate = config.tags.tag_categories.get(tag)
+            if candidate and candidate in config.categories:
+                return candidate
+        return None
+
+    if meta.category in GENERIC_CATEGORIES:
+        # Nothing to lose: anything specific beats "Correspondence".
+        return first_mapped(rule_tags(config, *_haystacks(meta, text))) or meta.category
+    if meta.classifier != "llm":
+        # A heuristic category is a guess from a word list. A keyword in the
+        # title is a better guess; one buried in the body is not.
+        return first_mapped(rule_tags(config, meta.title)) or meta.category
+    return meta.category
+
+
 def derived_tags(meta: DocumentMeta, config: Config, text: str = "") -> list[str]:
     """Everything we can tag without asking the model: category, year, sender,
     what the document is about, and whatever the keyword rules match."""
@@ -214,20 +268,48 @@ def derived_tags(meta: DocumentMeta, config: Config, text: str = "") -> list[str
         derived.append(slugify(meta.correspondent, max_length=40))
     if config.tags.subject_tags:
         derived.extend(slugify(subject, max_length=40) for subject in meta.subjects[:3])
-    derived.extend(rule_tags(config, meta.title, meta.correspondent, meta.summary, text[:4000]))
+    derived.extend(rule_tags(config, *_haystacks(meta, text)))
+    if meta.classifier != "llm" or (
+        meta.confidence is not None and meta.confidence < config.tags.review_below
+    ):
+        # Weak results should be findable, not just recorded in frontmatter.
+        derived.append("needs-review")
     return [tag for tag in derived if tag]
 
 
+# Below this, a model's answer is not a variant of one of our categories.
+CATEGORY_MATCH_CUTOFF = 0.72
+
+
 def _match_category(value: Any, config: Config) -> str:
-    if isinstance(value, str):
-        wanted = value.strip().lower()
-        for category in config.categories:
-            if category.lower() == wanted:
-                return category
-        for category in config.categories:
-            if wanted and (wanted in category.lower() or category.lower() in wanted):
-                return category
-    return config.categories[-1] if config.categories else "Other"
+    """Map whatever the model said onto the configured list.
+
+    Substring matching used to do this, which made "Motherhood" match "Other"
+    while "Utility bills" and "Bank" matched nothing at all. Similarity on the
+    whole phrase and on each word is both stricter and more forgiving in the
+    ways that matter.
+    """
+    fallback = config.categories[-1] if config.categories else "Other"
+    if not isinstance(value, str) or not value.strip():
+        return fallback
+
+    wanted = value.strip().lower()
+    for category in config.categories:
+        if category.lower() == wanted:
+            return category
+
+    candidates = [wanted, *re.split(r"[^\w]+", wanted)]
+    best, best_score = fallback, CATEGORY_MATCH_CUTOFF
+    for category in config.categories:
+        lowered = category.lower()
+        score = max(
+            SequenceMatcher(None, candidate, lowered).ratio()
+            for candidate in candidates
+            if candidate
+        )
+        if score >= best_score:
+            best, best_score = category, score
+    return best
 
 
 def from_response(
@@ -258,6 +340,7 @@ def from_response(
         currency=str(data.get("currency") or "").strip()[:8],
         confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
     )
+    meta.category = category_from_rules(meta, config, text)
     meta.tags = _clean_tags(data.get("tags"), config, derived_tags(meta, config, text))
     return meta
 
@@ -293,6 +376,14 @@ def resolve_date(meta: DocumentMeta, source: Path | None, config: Config) -> Doc
     return meta
 
 
+# Words that suggest a line names the document rather than its sender.
+DOCUMENT_WORDS = re.compile(
+    r"\b(invoice|receipt|statement|tariff|notice|letter|certificate|agreement|"
+    r"contract|bill|policy|summary|confirmation|reminder|payslip|declaration|"
+    r"faktura|kvitto|besked|intyg|avtal|beslut|underrättelse)\b",
+    re.IGNORECASE,
+)
+
 HEURISTIC_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Invoices", ("invoice", "faktura", "rechnung", "amount due", "bill to")),
     ("Receipts", ("receipt", "kvitto", "thank you for your purchase", "subtotal")),
@@ -315,20 +406,26 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         if candidate in config.categories and any(word in lowered for word in keywords):
             category = candidate
             break
-    first_line = next(
-        (line.strip() for line in text.splitlines() if len(line.strip()) > 8), ""
+    lines = [line.strip() for line in text.splitlines()[:20] if len(line.strip()) > 8]
+    # "EXAMPLE BANK PLC" is the letterhead; "Mortgage Charges Tariff" is the
+    # document, and it is usually a line or two below it.
+    titled = next(
+        (line for line in lines if DOCUMENT_WORDS.search(line)),
+        "",
     )
+    first_line = titled or (lines[0] if lines else "")
     title = (first_line[:80] or fallback_title).strip()
     title_source = "text" if first_line else "filename"
     meta = DocumentMeta(
         title=title,
         category=category,
         summary="",
-        document_date=parse_date(text[:4000]),
+        document_date=parse_date(text[:4000], config.dates.day_first),
         confidence=0.2,
         classifier="heuristic",
         title_source=title_source,
     )
+    meta.category = category_from_rules(meta, config, text)
     meta.tags = _clean_tags(["unclassified"], config, derived_tags(meta, config, text))
     return meta
 

@@ -180,7 +180,10 @@ def plan(
     report = OrganizeReport()
     own_cache = cache is None
     if own_cache:
-        cache = ClassificationCache(config.state_root, config, enabled=use_cache)
+        # --reclassify means ask again, so the cache stops answering for this run.
+        cache = ClassificationCache(
+            config.state_root, config, enabled=use_cache, read=not reclassify
+        )
     backend = "none"
     if ocr:
         try:
