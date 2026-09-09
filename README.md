@@ -10,9 +10,10 @@ CLI are called `scanvault`.
   correspondent, tags and a summary. scanvault writes an Obsidian note with that
   metadata as YAML frontmatter and files both the note and the PDF into a dated
   folder structure.
-* **Organizer.** The same classification can be re-run over an *existing* vault:
-  it adopts loose PDFs and re-files notes whose metadata is missing or whose
-  location no longer matches the configured layout.
+* **Organizer.** Both phases can be re-run over an *existing* vault: it OCRs
+  attachments that have no text layer, adopts loose PDFs, and re-files notes
+  whose metadata is missing or whose location no longer matches the configured
+  layout.
 
 The vault is laid out as a PARA ("Second Brain") structure, with the archive as
 its cornerstone — scanned paper is reference material, so that is where it
@@ -85,7 +86,7 @@ scanvault watch --source ~/Scans/inbox --vault ~/Obsidian/Archive --interval 30
 # phase 1 only: OCR into searchable PDFs and dump the text
 scanvault ocr ~/Scans/inbox --out ~/Scans/ocr --text-out ~/Scans/text
 
-# existing vault: dry run, then apply
+# existing vault: dry run, then apply (OCRs un-OCR'd PDFs, refiles notes)
 scanvault organize --vault ~/Obsidian/Archive
 scanvault organize --vault ~/Obsidian/Archive --apply
 scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
@@ -147,6 +148,48 @@ INVOICE 2024-05-02
 
 The extracted text is embedded so Obsidian's own search finds documents by their
 contents; turn it off with `include_text = false`.
+
+## Organizing an existing vault
+
+`scanvault organize` is phase 1 *and* phase 2 applied to documents that are
+already in the vault. It is a dry run by default: it prints one line per
+document and changes nothing until you add `--apply`.
+
+```bash
+scanvault organize --vault ~/Obsidian/Archive
+```
+
+```
+[dry-run] ocr: 4 Archive/Invoices/2024/2024-05-02 Acme Invoice.md (attachment has no text layer)
+[dry-run] relocate: 4 Archive/Unsorted/old.md -> 4 Archive/Contracts/2022/2022-02-02 Old Note.md (layout drift)
+[dry-run] adopt: Inbox/scan.pdf (no note points at this PDF)
+
+1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt, 12 already filed, 3 left alone, 0 failed
+Nothing was changed. Re-run with --apply to execute.
+```
+
+What each action means:
+
+| Action | What `--apply` does |
+| --- | --- |
+| `ocr` | The note's PDF has no text layer. Runs OCR, **replaces the attachment with the searchable PDF**, refreshes the note's extracted text and records the backend in `ocr:`. If the note's metadata was thin, it is classified from the fresh text and refiled. |
+| `relocate` | Moves the note and its PDF to where the templates say they belong. |
+| `rewrite` | Keeps the location, refreshes frontmatter from a new classification. |
+| `adopt` | A PDF in the vault that no note points at: OCR'd, classified and given a note. |
+| `already filed` | Nothing to do. |
+| `left alone` | A note scanvault did not write — see below. |
+
+Planning never runs OCR or moves anything, so a dry run stays cheap and safe;
+the OCR work happens only under `--apply`. Pass `--no-ocr` to skip the OCR pass
+entirely, `--reclassify` to re-run the model over every note, and `--no-adopt`
+to ignore loose PDFs.
+
+A document that was scanned before you had OCR set up therefore becomes
+searchable — in Obsidian *and* in the PDF itself — with:
+
+```bash
+scanvault organize --vault ~/Obsidian/Archive --apply
+```
 
 ## Vault layout (PARA)
 
@@ -249,6 +292,9 @@ properly. Set `fallback_to_heuristics = false` to fail loudly instead.
 
 If no OCR backend is installed, PDFs that already have a text layer are still
 processed; image-only ones are reported as failures and left in the source folder.
+`organize` still lists the attachments that need OCR, with
+`(no OCR backend installed)` in the reason, so you can see the backlog before
+installing anything.
 
 ## Scanner integration
 

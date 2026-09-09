@@ -177,6 +177,7 @@ def cmd_organize(args: argparse.Namespace) -> int:
         reclassify=args.reclassify,
         adopt=not args.no_adopt,
         include_unmanaged=args.include_unmanaged,
+        ocr=not args.no_ocr,
     )
     if args.apply:
         organizer_apply(report, config, client)
@@ -189,9 +190,10 @@ def cmd_organize(args: argparse.Namespace) -> int:
         if action.error:
             print(f"  error: {action.error}", file=sys.stderr)
     summary = (
-        f"\n{report.count('relocate')} to relocate, {report.count('rewrite')} to rewrite, "
-        f"{report.count('adopt')} to adopt, {report.count('noop')} already filed, "
-        f"{report.count('skipped')} left alone, {report.count('failed')} failed"
+        f"\n{report.count('ocr')} to OCR, {report.count('relocate')} to relocate, "
+        f"{report.count('rewrite')} to rewrite, {report.count('adopt')} to adopt, "
+        f"{report.count('noop')} already filed, {report.count('skipped')} left alone, "
+        f"{report.count('failed')} failed"
     )
     print(summary if not args.apply else summary.replace("to ", ""))
     if not args.apply:
@@ -313,6 +315,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_org.add_argument("--apply", action="store_true", help="execute (default is a dry run)")
     p_org.add_argument("--reclassify", action="store_true", help="re-run the model on every note")
     p_org.add_argument("--no-adopt", action="store_true", help="ignore loose PDFs in the vault")
+    p_org.add_argument(
+        "--no-ocr",
+        action="store_true",
+        help="do not OCR attachments that have no text layer",
+    )
     p_org.add_argument(
         "--include-unmanaged",
         action="store_true",

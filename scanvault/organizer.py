@@ -17,7 +17,7 @@ from typing import Any
 
 from .classify import DocumentMeta, classify
 from .config import BUCKETS, Config
-from .extract import OcrError, extract, pdf_text
+from .extract import OcrError, available_backend, extract, pdf_text
 from .llm import OllamaClient
 from .pipeline import process_file
 from .state import State
@@ -40,6 +40,9 @@ class Action:
     frontmatter: dict[str, Any] = field(default_factory=dict)
     body_text: str = ""
     error: str = ""
+    # Set when the note's PDF has no text layer and must be OCR'd first.
+    needs_ocr: bool = False
+    classify_after: bool = False
 
     def describe(self, root: Path) -> str:
         def rel(p: Path | None) -> str:
@@ -50,7 +53,8 @@ class Action:
             except ValueError:
                 return str(p)
 
-        if self.kind in ("relocate", "adopt"):
+        moved = self.target is not None and self.target != self.path
+        if self.kind in ("relocate", "adopt") or (self.kind == "ocr" and moved):
             return f"{self.kind}: {rel(self.path)} -> {rel(self.target)} ({self.reason})"
         return f"{self.kind}: {rel(self.path)} ({self.reason})"
 
@@ -64,22 +68,36 @@ class OrganizeReport:
 
 
 def note_text(vault: Vault, note: Path, frontmatter: dict[str, Any], body: str, config: Config) -> str:
-    """Best text available for a note: the attachment's, else the embedded block."""
-    attachment = frontmatter.get("attachment")
-    if isinstance(attachment, str):
-        pdf = vault.root / attachment
-        if pdf.is_file():
-            text = pdf_text(pdf)
-            if len(text) >= config.ocr.min_text_chars:
-                return text
-            try:
-                return extract(pdf, config.ocr, work_dir=config.state_root / "work").text
-            except OcrError as exc:
-                log.warning("could not OCR %s: %s", pdf.name, exc)
+    """Best text already available for a note - never runs OCR.
+
+    Planning stays read-only and cheap; OCR is a separate, reported action.
+    """
+    attachment = attachment_path(vault, frontmatter)
+    if attachment is not None:
+        text = pdf_text(attachment)
+        if len(text) >= config.ocr.min_text_chars:
+            return text
     match = TEXT_BLOCK_RE.search(body)
     if match:
         return match.group(1)
     return re.sub(r"^#.*$", "", body, flags=re.MULTILINE).strip()
+
+
+def attachment_path(vault: Vault, frontmatter: dict[str, Any]) -> Path | None:
+    """The note's attachment, if it is recorded and still on disk."""
+    attachment = frontmatter.get("attachment")
+    if not isinstance(attachment, str):
+        return None
+    path = vault.root / attachment
+    return path if path.is_file() else None
+
+
+def attachment_needs_ocr(vault: Vault, frontmatter: dict[str, Any], config: Config) -> bool:
+    """True when the note's PDF is image-only, i.e. not searchable yet."""
+    attachment = attachment_path(vault, frontmatter)
+    if attachment is None or attachment.suffix.lower() != ".pdf":
+        return False
+    return len(pdf_text(attachment)) < config.ocr.min_text_chars
 
 
 def resolve_bucket(vault: Vault, note: Path, frontmatter: dict[str, Any], config: Config) -> str:
@@ -116,10 +134,17 @@ def plan(
     reclassify: bool = False,
     adopt: bool = True,
     include_unmanaged: bool = False,
+    ocr: bool = True,
 ) -> OrganizeReport:
     """Work out what the vault needs, without touching anything."""
     vault = Vault(config)
     report = OrganizeReport()
+    backend = "none"
+    if ocr:
+        try:
+            backend = available_backend(config.ocr)
+        except OcrError as exc:
+            log.warning("%s", exc)
 
     for note in vault.iter_notes():
         try:
@@ -136,6 +161,17 @@ def plan(
             continue
 
         should_classify = reclassify or needs_classification(frontmatter)
+
+        if ocr and attachment_needs_ocr(vault, frontmatter, config):
+            reason = "attachment has no text layer"
+            if backend == "none":
+                reason += " (no OCR backend installed)"
+            action = Action("ocr", note, None, reason, None, frontmatter, "")
+            action.needs_ocr = True
+            action.classify_after = should_classify or not frontmatter.get("category")
+            report.actions.append(action)
+            continue
+
         text = ""
         if should_classify:
             text = note_text(vault, note, frontmatter, body, config)
@@ -178,6 +214,28 @@ def _move_attachment(vault: Vault, frontmatter: dict[str, Any], meta: DocumentMe
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(current), target)
     return target
+
+
+def _run_ocr(
+    vault: Vault, action: Action, config: Config, client: OllamaClient | None
+) -> None:
+    """OCR the note's attachment in place, then refresh its metadata and text."""
+    pdf = attachment_path(vault, action.frontmatter)
+    if pdf is None:
+        raise OcrError("the attachment recorded in this note is missing")
+    result = extract(pdf, config.ocr, work_dir=config.state_root / "work")
+    if result.pdf_path != pdf and result.pdf_path.exists():
+        # Keep the searchable PDF: that is the point of OCR'ing an old vault.
+        shutil.move(str(result.pdf_path), pdf)
+    if action.classify_after:
+        action.meta = classify(result.text, config, client, source=action.path)
+    else:
+        action.meta = vault.meta_from_note(action.frontmatter, action.path.stem)
+    action.meta.para = resolve_bucket(vault, action.path, action.frontmatter, config)
+    action.body_text = result.text
+    action.frontmatter["ocr"] = result.backend
+    if result.pages:
+        action.frontmatter["pages"] = result.pages
 
 
 def _rewrite_note(
@@ -225,9 +283,14 @@ def apply(
                     action.target, action.meta = result.note, result.meta
                 continue
 
+            if action.kind == "ocr":
+                _run_ocr(vault, action, config, client)
+                target = vault.note_path(action.meta)
+                action.target = None if target.resolve() == action.path.resolve() else target
+
             attachment = _move_attachment(vault, action.frontmatter, action.meta)
             destination = action.path
-            if action.kind == "relocate" and action.target is not None:
+            if action.target is not None and action.target.resolve() != action.path.resolve():
                 destination = unique_path(action.target)
                 action.target = destination
             _rewrite_note(vault, action, attachment, destination)
