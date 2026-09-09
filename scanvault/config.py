@@ -121,10 +121,11 @@ class VaultConfig:
     notes_dir: str = ""
     attachments_dir: str = ""
     para: ParaConfig = field(default_factory=ParaConfig)
-    # Available placeholders: para, category, year, month, date, title, slug,
-    # correspondent
-    note_path_template: str = "{para}/{category}/{year}/{date} {title}"
-    attachment_path_template: str = "{para}/_attachments/{category}/{year}/{date} {title}"
+    # Available placeholders: para, category, year, month, date, name, title,
+    # slug, correspondent. `name` is correspondent + title, which is what makes
+    # a filename readable on its own.
+    note_path_template: str = "{para}/{category}/{year}/{date} {name}"
+    attachment_path_template: str = "{para}/_attachments/{category}/{year}/{date} {name}"
     # move | copy | leave
     source_action: str = "move"
     # Extra tags added to every note.

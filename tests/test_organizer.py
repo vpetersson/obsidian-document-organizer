@@ -107,12 +107,13 @@ class TestOrganizer(unittest.TestCase):
         organizer_apply(report, self.config, client=client)
 
         self.assertIn("RENTAL AGREEMENT", client.calls[0][1], "the model should see the PDF text")
-        moved = self.vault_dir / "4 Archive/Contracts/2023/2023-01-15 Rental Agreement.md"
+        moved = self.vault_dir / "4 Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
         self.assertTrue(moved.is_file())
         frontmatter, body = parse_frontmatter(moved.read_text())
         self.assertEqual(frontmatter["correspondent"], "Landlord Ltd")
         self.assertEqual(
-            frontmatter["attachment"], "4 Archive/_attachments/Contracts/2023/2023-01-15 Rental Agreement.pdf"
+            frontmatter["attachment"],
+            "4 Archive/_attachments/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.pdf",
         )
         self.assertTrue((self.vault_dir / frontmatter["attachment"]).is_file())
         self.assertFalse(pdf.exists(), "the attachment should have moved with the note")
@@ -125,7 +126,10 @@ class TestOrganizer(unittest.TestCase):
         self.assertEqual(report.count("adopt"), 1)
         organizer_apply(report, self.config, client=StubClient(LLM_RESPONSE))
         self.assertTrue(
-            (self.vault_dir / "4 Archive/Contracts/2023/2023-01-15 Rental Agreement.md").is_file()
+            (
+                self.vault_dir
+                / "4 Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
+            ).is_file()
         )
 
     def test_no_adopt_ignores_loose_pdfs(self):
@@ -136,8 +140,9 @@ class TestOrganizer(unittest.TestCase):
 
     def test_reclassify_rewrites_in_place(self):
         self.write_note(
-            "Contracts/2023/2023-01-15 Rental Agreement.md",
+            "Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md",
             '---\ntitle: "Rental Agreement"\ndate: 2023-01-15\ncategory: "Contracts"\n'
+            'correspondent: "Landlord Ltd"\n'
             'tags:\n  - scan\nclassifier: "llm"\nsource_hash: "deadbeef"\n---\n\n'
             "## Extracted text\n\n```text\nRENTAL AGREEMENT 2023-01-15\n```\n",
         )
@@ -145,7 +150,10 @@ class TestOrganizer(unittest.TestCase):
         report = plan(self.config, client=client, reclassify=True)
         self.assertEqual(report.count("rewrite"), 1)
         organizer_apply(report, self.config, client=client)
-        note = self.vault_dir / "4 Archive/Contracts/2023/2023-01-15 Rental Agreement.md"
+        note = (
+            self.vault_dir
+            / "4 Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
+        )
         frontmatter, body = parse_frontmatter(note.read_text())
         self.assertEqual(frontmatter["correspondent"], "Landlord Ltd")
         self.assertEqual(frontmatter["source_hash"], "deadbeef", "provenance must survive a rewrite")

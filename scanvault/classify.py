@@ -13,7 +13,14 @@ from .cache import ClassificationCache
 from .config import Config
 from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
-from .util import date_from_filename, file_created_date, parse_date, slugify, truncate_words
+from .util import (
+    clean_document_name,
+    date_from_filename,
+    file_created_date,
+    parse_date,
+    slugify,
+    truncate_words,
+)
 
 log = logging.getLogger(__name__)
 
@@ -87,6 +94,9 @@ class DocumentMeta:
     # Where document_date came from: document | filename | pdf-metadata |
     # file-created. Empty when the document is undated.
     date_source: str = ""
+    # Where the title came from: model | text | filename. Worth recording,
+    # because a title lifted from a scanner's filename is not a title.
+    title_source: str = "model"
     # PARA bucket: project | area | resource | archive. Scans default to the
     # archive; a human moves a note elsewhere by editing its frontmatter.
     para: str = "archive"
@@ -103,8 +113,20 @@ class DocumentMeta:
     def date_str(self) -> str:
         return self.document_date.isoformat() if self.document_date else "undated"
 
+    @property
+    def document_name(self) -> str:
+        """The document's name from its metadata: "Acme Ltd - Invoice INV-1234"."""
+        title = self.title.strip()
+        correspondent = self.correspondent.strip()
+        if not correspondent:
+            return title
+        if correspondent.lower() in title.lower():
+            return title
+        return f"{correspondent} - {title}" if title else correspondent
+
     def placeholders(self) -> dict[str, str]:
         return {
+            "name": self.document_name,
             "category": self.category,
             "year": self.year,
             "month": self.month,
@@ -141,7 +163,8 @@ def _match_category(value: Any, config: Config) -> str:
 
 def from_response(data: dict[str, Any], config: Config, fallback_title: str) -> DocumentMeta:
     """Normalise a raw model response into a DocumentMeta we can trust."""
-    title = str(data.get("title") or "").strip() or fallback_title
+    model_title = str(data.get("title") or "").strip()
+    title = model_title or fallback_title
     category = _match_category(data.get("category"), config)
     correspondent = str(data.get("correspondent") or "").strip()
     confidence = data.get("confidence")
@@ -151,6 +174,7 @@ def from_response(data: dict[str, Any], config: Config, fallback_title: str) -> 
         summary=str(data.get("summary") or "").strip(),
         document_date=parse_date(data.get("document_date")),
         correspondent=correspondent[:120],
+        title_source="model" if model_title else "filename",
         tags=_clean_tags(data.get("tags"), config, [slugify(category)]),
         language=str(data.get("language") or "").strip(),
         reference=str(data.get("reference") or "").strip()[:80],
@@ -217,6 +241,7 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         (line.strip() for line in text.splitlines() if len(line.strip()) > 8), ""
     )
     title = (first_line[:80] or fallback_title).strip()
+    title_source = "text" if first_line else "filename"
     return DocumentMeta(
         title=title,
         category=category,
@@ -225,6 +250,7 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         tags=_clean_tags(["unclassified"], config, [slugify(category)]),
         confidence=0.2,
         classifier="heuristic",
+        title_source=title_source,
     )
 
 
@@ -236,7 +262,9 @@ def classify(
     cache: ClassificationCache | None = None,
 ) -> DocumentMeta:
     """Classify one document, degrading to heuristics when configured to."""
-    fallback_title = source.stem.replace("_", " ").strip() if source else "Untitled document"
+    # A scanner's filename is noise, not a title: strip what it stamps on and
+    # only keep what is left if there is something to keep.
+    fallback_title = (clean_document_name(source.stem) if source else "") or "Untitled document"
     if not text.strip():
         meta = heuristic("", config, fallback_title)
         meta.tags = _clean_tags(["empty-text"], config, [])
