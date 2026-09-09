@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scanvault"
+version = "0.1.0"
+description = "OCR scanned PDFs and organize them into an Obsidian vault with ollama + Qwen"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = []
+
+[project.optional-dependencies]
+# pypdf gives faster, dependency-free text extraction; poppler's pdftotext is used otherwise.
+fast = ["pypdf>=4.0"]
+
+[project.scripts]
+scanvault = "scanvault.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/vpetersson/obsidian-document-organizer"
+
+[tool.setuptools.packages.find]
+include = ["scanvault*"]
