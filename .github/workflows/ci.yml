@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }}${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        extras: [""]
+        label: [""]
+        include:
+          # pypdf is optional; this job exercises that extraction path too.
+          - python-version: "3.12"
+            extras: "--extra fast"
+            label: " + pypdf"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the OCR toolchain
+        # Without these the OCR tests skip themselves, so CI must provide them.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ocrmypdf tesseract-ocr tesseract-ocr-eng poppler-utils
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Check uv.lock is up to date
+        run: uv lock --check
+
+      - name: Sync the environment
+        run: uv sync --python ${{ matrix.python-version }} ${{ matrix.extras }}
+
+      - name: Show the detected toolchain
+        run: uv run --python ${{ matrix.python-version }} scanvault doctor
+
+      - name: Run the test suite
+        run: uv run --python ${{ matrix.python-version }} python -m unittest discover -s tests -t . -v
