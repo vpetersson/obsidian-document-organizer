@@ -72,23 +72,28 @@ scanvault doctor --vault ~/Obsidian/Archive --source ~/Scans/inbox
 
 Prefix any of these with `uv run` if you did not `uv tool install` the CLI.
 
+**Every command that writes previews by default.** Run it, read what it says it
+will do, then repeat it with `--apply`. There is no command that changes your
+vault without that flag, and `--dry-run` is accepted everywhere as an explicit
+way to say "preview", which is useful in scripts.
+
 ```bash
 # create the PARA folders (optional; ingest does it too)
-scanvault init-vault --vault ~/Obsidian/Archive
+scanvault init-vault --vault ~/Obsidian/Archive --apply
 
 # see what would happen, change nothing
-scanvault ingest --source ~/Scans/inbox --vault ~/Obsidian/Archive --dry-run
-
-# do it (originals are moved into the vault; --keep-source copies instead)
 scanvault ingest --source ~/Scans/inbox --vault ~/Obsidian/Archive
 
+# do it (originals are moved into the vault; --keep-source copies instead)
+scanvault ingest --source ~/Scans/inbox --vault ~/Obsidian/Archive --apply
+
 # keep watching the scanner folder
-scanvault watch --source ~/Scans/inbox --vault ~/Obsidian/Archive --interval 30
+scanvault watch --source ~/Scans/inbox --vault ~/Obsidian/Archive --interval 30 --apply
 
 # phase 1 only: OCR into searchable PDFs and dump the text
-scanvault ocr ~/Scans/inbox --out ~/Scans/ocr --text-out ~/Scans/text
+scanvault ocr ~/Scans/inbox --out ~/Scans/ocr --text-out ~/Scans/text --apply
 
-# existing vault: dry run, then apply (OCRs un-OCR'd PDFs, refiles notes)
+# existing vault: preview, then apply (OCRs un-OCR'd PDFs, refiles notes)
 scanvault organize --vault ~/Obsidian/Archive
 scanvault organize --vault ~/Obsidian/Archive --apply
 scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
@@ -154,8 +159,8 @@ contents; turn it off with `include_text = false`.
 ## Organizing an existing vault
 
 `scanvault organize` is phase 1 *and* phase 2 applied to documents that are
-already in the vault. It is a dry run by default: it prints one line per
-document and changes nothing until you add `--apply`.
+already in the vault. Like every other writing command it previews by default:
+it prints one line per document and changes nothing until you add `--apply`.
 
 ```bash
 scanvault organize --vault ~/Obsidian/Archive
@@ -218,9 +223,9 @@ The four folders are the PARA framework from *Building a Second Brain*:
 | `3 Resources` | Topics and reference material you are not actively working |
 | `4 Archive` | Everything inactive — **and the default home for every scan** |
 
-`scanvault init-vault --vault ~/Obsidian/Archive` creates the four folders with a
-short index note in each; `ingest` also creates them on first run. Both are
-idempotent and never overwrite an existing note.
+`scanvault init-vault --vault ~/Obsidian/Archive --apply` creates the four folders
+with a short index note in each; `ingest --apply` also creates them on first run.
+Both are idempotent and never overwrite an existing note.
 
 Documents move between buckets in two ways, and the organizer honours both:
 
@@ -236,13 +241,20 @@ area notes are never moved, even though they live in the same vault. Pass
 `--include-unmanaged` to `organize` if you *do* want hand-made notes filed by the
 same rules.
 
+### Upgrading from 0.2
+
+`ingest`, `watch`, `ocr`, `init-vault` and `init-config` used to act immediately;
+`organize` was the only command that waited for `--apply`. They all wait now, so
+add `--apply` to any script or service unit that expects work to happen. Nothing
+else changed, and `--dry-run` still means what it always did.
+
 ### Migrating a vault from 0.1
 
 0.1 filed everything under `Documents/` and `Attachments/`. To move an existing
 vault into the PARA layout:
 
 ```bash
-scanvault organize --vault ~/Obsidian/Archive          # dry run, shows every move
+scanvault organize --vault ~/Obsidian/Archive          # preview, shows every move
 scanvault organize --vault ~/Obsidian/Archive --apply
 ```
 
@@ -251,8 +263,8 @@ pruned.
 
 ## Configuration
 
-`scanvault init-config -o ~/Obsidian/Archive/.scanvault/scanvault.toml` writes a
-starting point. A config is picked up automatically from
+`scanvault init-config -o ~/Obsidian/Archive/.scanvault/scanvault.toml --apply`
+writes a starting point. A config is picked up automatically from
 `<vault>/.scanvault/scanvault.toml`, `<vault>/scanvault.toml` or `./scanvault.toml`;
 CLI flags win over the file.
 
@@ -326,7 +338,7 @@ Description=scanvault watcher
 After=network-online.target
 
 [Service]
-ExecStart=%h/.local/bin/scanvault watch --config %h/Obsidian/Archive/.scanvault/scanvault.toml
+ExecStart=%h/.local/bin/scanvault watch --apply --config %h/Obsidian/Archive/.scanvault/scanvault.toml
 Restart=on-failure
 
 [Install]
@@ -362,6 +374,6 @@ extractor skip themselves if neither `pypdf` nor `pdftotext` is present.
   attachment path.
 * The model tag defaults to `qwen3.5:9b`. Use `--model` (or `[llm] model`) for
   any other ollama tag or a local Modelfile build.
-* Classification quality depends on OCR quality. `scanvault ocr --text-out` is
+* Classification quality depends on OCR quality. `scanvault ocr --text-out --apply` is
   the quickest way to see what the model actually gets.
 * Everything runs locally: no document text leaves the machine.

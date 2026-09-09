@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import CONFIG_FILENAME, Config, find_config, load_config
-from .extract import available_backend, extract
+from .extract import available_backend, extract, pdf_text
 from .llm import LlmError, OllamaClient
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
@@ -54,6 +54,26 @@ resources_dir = "3 Resources"
 archive_dir = "4 Archive"
 default_bucket = "archive"   # where new scans land
 """
+
+
+def add_execution_flags(parser: argparse.ArgumentParser) -> None:
+    """Every command that writes anything takes the same pair of flags."""
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--apply", action="store_true", help="make the changes (default: preview only)"
+    )
+    group.add_argument(
+        "--dry-run", action="store_true", help="preview only, changing nothing (the default)"
+    )
+
+
+def is_preview(args: argparse.Namespace) -> bool:
+    return not getattr(args, "apply", False)
+
+
+def print_preview_trailer(preview: bool) -> None:
+    if preview:
+        print("Nothing was changed. Re-run with --apply to execute.")
 
 
 def _configure_logging(verbose: int, quiet: bool) -> None:
@@ -110,21 +130,22 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if not paths:
         print(f"No PDFs found in {config.source_dir}")
         return 0
-    report = ingest(config, paths, _client(args, config), dry_run=args.dry_run, use_state=not args.no_state)
+    preview = is_preview(args)
+    report = ingest(
+        config, paths, _client(args, config), dry_run=preview, use_state=not args.no_state
+    )
 
     for result in report.results:
         if result.status == "ingested":
             note = result.note.relative_to(config.vault_dir) if result.note else "?"
-            marker = "would file" if args.dry_run else "filed"
-            print(f"{marker}: {result.source.name} -> {note}")
+            print(f"{'would file' if preview else 'filed'}: {result.source.name} -> {note}")
         elif result.status == "duplicate":
             print(f"skipped (already filed): {result.source.name}")
         else:
             print(f"FAILED: {result.source.name}: {result.error}", file=sys.stderr)
-    print(
-        f"\n{report.count('ingested')} filed, {report.count('duplicate')} duplicates, "
-        f"{report.count('failed')} failed"
-    )
+    filed = f"{report.count('ingested')} {'to file' if preview else 'filed'}"
+    print(f"\n{filed}, {report.count('duplicate')} duplicates, {report.count('failed')} failed")
+    print_preview_trailer(preview)
     return 1 if report.failures else 0
 
 
@@ -132,9 +153,17 @@ def cmd_watch(args: argparse.Namespace) -> int:
     config = _build_config(args)
     if config.source_dir is None or config.vault_dir is None:
         raise SystemExit("both --source and --vault are required")
-    print(f"Watching {config.source_dir} every {args.interval}s (Ctrl-C to stop)")
+    preview = is_preview(args)
+    mode = "previewing" if preview else "filing"
+    print(f"Watching {config.source_dir} every {args.interval}s, {mode} (Ctrl-C to stop)")
     try:
-        watch(config, _client(args, config), interval=args.interval, iterations=args.iterations)
+        watch(
+            config,
+            _client(args, config),
+            interval=args.interval,
+            iterations=args.iterations,
+            dry_run=preview,
+        )
     except KeyboardInterrupt:
         print("\nstopped")
     return 0
@@ -145,10 +174,18 @@ def cmd_ocr(args: argparse.Namespace) -> int:
     out_dir = Path(args.out).expanduser() if args.out else None
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)
+    preview = is_preview(args)
     failures = 0
     for source in args.paths:
         path = Path(source).expanduser()
         for pdf in iter_pdfs(path):
+            if preview:
+                chars = len(pdf_text(pdf))
+                if chars < config.ocr.searchable_min_chars:
+                    print(f"would OCR: {pdf.name} (no text layer)")
+                else:
+                    print(f"would skip: {pdf.name} (already searchable, {chars} chars)")
+                continue
             try:
                 result = extract(pdf, config.ocr, work_dir=out_dir or pdf.parent)
             except Exception as exc:
@@ -163,6 +200,7 @@ def cmd_ocr(args: argparse.Namespace) -> int:
                 f"{pdf.name}: {result.backend}, {result.char_count} chars"
                 + (f", searchable pdf -> {result.pdf_path}" if result.ocr_performed else "")
             )
+    print_preview_trailer(preview)
     return 1 if failures else 0
 
 
@@ -179,13 +217,14 @@ def cmd_organize(args: argparse.Namespace) -> int:
         include_unmanaged=args.include_unmanaged,
         ocr=not args.no_ocr,
     )
-    if args.apply:
+    preview = is_preview(args)
+    if not preview:
         organizer_apply(report, config, client)
 
     for action in report.actions:
         if action.kind == "noop" and not args.verbose:
             continue
-        prefix = "" if args.apply else "[dry-run] "
+        prefix = "[dry-run] " if preview else ""
         print(prefix + action.describe(config.vault_dir))
         if action.error:
             print(f"  error: {action.error}", file=sys.stderr)
@@ -199,14 +238,13 @@ def cmd_organize(args: argparse.Namespace) -> int:
         f"{report.count('noop')} already filed, {report.count('duplicate')} duplicates, "
         f"{report.count('skipped')} left alone, {report.count('failed')} failed"
     )
-    print(summary if not args.apply else summary.replace("to ", ""))
+    print(summary if preview else summary.replace("to ", ""))
     if report.count("skipped"):
         print(
             f"{report.count('skipped')} notes were left alone because scanvault did not "
             "write them; pass --include-unmanaged to file those too."
         )
-    if not args.apply:
-        print("Nothing was changed. Re-run with --apply to execute.")
+    print_preview_trailer(preview)
     return 1 if report.count("failed") else 0
 
 
@@ -214,15 +252,20 @@ def cmd_init_vault(args: argparse.Namespace) -> int:
     config = _build_config(args)
     if config.vault_dir is None:
         raise SystemExit("--vault is required")
+    preview = is_preview(args)
     vault = Vault(config)
-    if not args.dry_run:
+    if not preview:
         vault.root.mkdir(parents=True, exist_ok=True)
-    created = vault.scaffold(dry_run=args.dry_run)
+    created = vault.scaffold(dry_run=preview)
     for path in created:
-        prefix = "would create" if args.dry_run else "created"
-        print(f"{prefix}: {path.relative_to(config.vault_dir).parent}")
+        print(
+            f"{'would create' if preview else 'created'}: "
+            f"{path.relative_to(config.vault_dir).parent}"
+        )
     if not created:
         print(f"{config.vault_dir} already has the PARA folders")
+    elif preview:
+        print_preview_trailer(preview)
     return 0
 
 
@@ -266,6 +309,10 @@ def cmd_init_config(args: argparse.Namespace) -> int:
     target = Path(args.output).expanduser() if args.output else Path.cwd() / CONFIG_FILENAME
     if target.exists() and not args.force:
         raise SystemExit(f"{target} already exists (use --force to overwrite)")
+    if is_preview(args):
+        print(f"would write {target}")
+        print_preview_trailer(True)
+        return 0
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(SAMPLE_CONFIG, encoding="utf-8")
     print(f"wrote {target}")
@@ -275,7 +322,10 @@ def cmd_init_config(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="scanvault",
-        description="OCR scanned PDFs and file them into an Obsidian vault using ollama.",
+        description=(
+            "OCR scanned PDFs and file them into an Obsidian vault using ollama. "
+            "Every command that writes previews by default; add --apply to execute."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"scanvault {__version__}")
     parser.add_argument("--config", help=f"path to {CONFIG_FILENAME}")
@@ -291,12 +341,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest = sub.add_parser("ingest", help="OCR and file new scans into the vault")
     p_ingest.add_argument("--source", required=False, help="folder (or file) with scanned PDFs")
     p_ingest.add_argument("--vault", required=False, help="Obsidian vault folder")
-    p_ingest.add_argument("--dry-run", action="store_true", help="show what would happen")
     p_ingest.add_argument("--force-ocr", action="store_true", help="OCR even if a text layer exists")
     p_ingest.add_argument("--lang", help="OCR languages, e.g. eng+swe")
     p_ingest.add_argument("--keep-source", action="store_true", help="copy instead of moving originals")
     p_ingest.add_argument("--no-recursive", action="store_true")
     p_ingest.add_argument("--no-state", action="store_true", help="ignore the dedupe index")
+    add_execution_flags(p_ingest)
     add_llm_flags(p_ingest)
     p_ingest.set_defaults(func=cmd_ingest)
 
@@ -308,6 +358,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_watch.add_argument("--force-ocr", action="store_true")
     p_watch.add_argument("--lang")
     p_watch.add_argument("--keep-source", action="store_true")
+    add_execution_flags(p_watch)
     add_llm_flags(p_watch)
     p_watch.set_defaults(func=cmd_watch)
 
@@ -317,11 +368,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_ocr.add_argument("--text-out", help="folder for extracted .txt files")
     p_ocr.add_argument("--force-ocr", action="store_true")
     p_ocr.add_argument("--lang")
+    add_execution_flags(p_ocr)
     p_ocr.set_defaults(func=cmd_ocr)
 
     p_org = sub.add_parser("organize", help="reorganize documents already in the vault")
     p_org.add_argument("--vault", required=False)
-    p_org.add_argument("--apply", action="store_true", help="execute (default is a dry run)")
     p_org.add_argument("--reclassify", action="store_true", help="re-run the model on every note")
     p_org.add_argument("--no-adopt", action="store_true", help="ignore loose PDFs in the vault")
     p_org.add_argument(
@@ -334,6 +385,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="also file notes scanvault did not write (default: leave them alone)",
     )
+    add_execution_flags(p_org)
     add_llm_flags(p_org)
     p_org.set_defaults(func=cmd_organize)
 
@@ -341,7 +393,7 @@ def build_parser() -> argparse.ArgumentParser:
         "init-vault", help="create the PARA (Second Brain) folders in a vault"
     )
     p_init_vault.add_argument("--vault", required=False)
-    p_init_vault.add_argument("--dry-run", action="store_true")
+    add_execution_flags(p_init_vault)
     p_init_vault.set_defaults(func=cmd_init_vault)
 
     p_doctor = sub.add_parser("doctor", help="check OCR backends, ollama and the model")
@@ -354,6 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_init = sub.add_parser("init-config", help=f"write a sample {CONFIG_FILENAME}")
     p_init.add_argument("--output", "-o")
     p_init.add_argument("--force", action="store_true")
+    add_execution_flags(p_init)
     p_init.set_defaults(func=cmd_init_config)
     return parser
 
