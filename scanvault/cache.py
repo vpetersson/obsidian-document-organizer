@@ -30,10 +30,14 @@ class ClassificationCache:
     editing a document misses rather than returning something stale.
     """
 
-    def __init__(self, root: Path, config: Config, enabled: bool = True):
+    def __init__(self, root: Path, config: Config, enabled: bool = True, read: bool = True):
         self.root = root
         self.path = root / CACHE_FILENAME
         self.enabled = enabled
+        # A cache that answers is the wrong thing during --reclassify: the point
+        # of that flag is to ask again. Writing stays on, so the new answers are
+        # the ones the next run reuses.
+        self.read = read
         self.model = config.llm.model
         self.categories = list(config.categories)
         self.language_hint = config.language_hint
@@ -83,7 +87,7 @@ class ClassificationCache:
         return digest.hexdigest()
 
     def get(self, text: str) -> dict[str, Any] | None:
-        if not self.enabled:
+        if not self.enabled or not self.read:
             return None
         entry = self.entries.get(self.key(text))
         response = entry.get("response") if isinstance(entry, dict) else None

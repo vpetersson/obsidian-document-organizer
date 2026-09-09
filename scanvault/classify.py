@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from difflib import SequenceMatcher
 from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import date
@@ -81,7 +82,11 @@ def build_prompt(
         "- reference: invoice/account/case number if present.",
         "- amount + currency: the document's headline total, if it has one.",
         "- confidence: 0.0-1.0, how sure you are about category and title.",
-        f"- Write title and summary in {config.language_hint}.",
+        (
+            "- Write the title and summary in the language the document is written in."
+            if config.language_hint.lower() in ("auto", "document", "")
+            else f"- Write title and summary in {config.language_hint}."
+        ),
         "",
     ]
     if filename:
@@ -89,8 +94,25 @@ def build_prompt(
     if folder:
         # Where someone filed it by hand is a strong hint about what it is.
         parts.append(f"Folder it was found in: {folder}")
-    parts += ["Document text:", '"""', truncate_words(text, config.llm.max_chars), '"""']
+    parts += ["Document text:", '"""', document_excerpt(text, config), '"""']
     return "\n".join(parts)
+
+
+def document_excerpt(text: str, config: Config) -> str:
+    """The part of the document the model gets to see.
+
+    Long documents are sampled from both ends: what a document is tends to be
+    stated at the top, and totals, dates and signatures live at the bottom. The
+    budget is also capped against `num_ctx`, so a small context window truncates
+    the document rather than silently eating the instructions above it.
+    """
+    # Roughly 3.5 characters per token, less what the prompt and the answer need.
+    budget = min(config.llm.max_chars, max(1000, int(config.llm.num_ctx * 3.5) - 4000))
+    if len(text) <= budget:
+        return text
+    head = int(budget * 0.7)
+    tail = budget - head
+    return f"{truncate_words(text[:head], head)}\n[...]\n{text[-tail:]}"
 
 
 @dataclass
@@ -188,7 +210,7 @@ def rule_tags(config: Config, *haystacks: str) -> list[str]:
     "Correspondence", and that is exactly the search someone will run.
     """
     text = "\n".join(part for part in haystacks if part)
-    frozen = tuple((tag, tuple(keywords)) for tag, keywords in config.tags.rules.items())
+    frozen = tuple((tag, tuple(keywords)) for tag, keywords in config.tags.all_rules().items())
     return [tag for tag, pattern in _compiled_rules(frozen) if pattern.search(text)]
 
 
@@ -215,19 +237,47 @@ def derived_tags(meta: DocumentMeta, config: Config, text: str = "") -> list[str
     if config.tags.subject_tags:
         derived.extend(slugify(subject, max_length=40) for subject in meta.subjects[:3])
     derived.extend(rule_tags(config, meta.title, meta.correspondent, meta.summary, text[:4000]))
+    if meta.classifier != "llm" or (
+        meta.confidence is not None and meta.confidence < config.tags.review_below
+    ):
+        # Weak results should be findable, not just recorded in frontmatter.
+        derived.append("needs-review")
     return [tag for tag in derived if tag]
 
 
+# Below this, a model's answer is not a variant of one of our categories.
+CATEGORY_MATCH_CUTOFF = 0.72
+
+
 def _match_category(value: Any, config: Config) -> str:
-    if isinstance(value, str):
-        wanted = value.strip().lower()
-        for category in config.categories:
-            if category.lower() == wanted:
-                return category
-        for category in config.categories:
-            if wanted and (wanted in category.lower() or category.lower() in wanted):
-                return category
-    return config.categories[-1] if config.categories else "Other"
+    """Map whatever the model said onto the configured list.
+
+    Substring matching used to do this, which made "Motherhood" match "Other"
+    while "Utility bills" and "Bank" matched nothing at all. Similarity on the
+    whole phrase and on each word is both stricter and more forgiving in the
+    ways that matter.
+    """
+    fallback = config.categories[-1] if config.categories else "Other"
+    if not isinstance(value, str) or not value.strip():
+        return fallback
+
+    wanted = value.strip().lower()
+    for category in config.categories:
+        if category.lower() == wanted:
+            return category
+
+    candidates = [wanted, *re.split(r"[^\w]+", wanted)]
+    best, best_score = fallback, CATEGORY_MATCH_CUTOFF
+    for category in config.categories:
+        lowered = category.lower()
+        score = max(
+            SequenceMatcher(None, candidate, lowered).ratio()
+            for candidate in candidates
+            if candidate
+        )
+        if score >= best_score:
+            best, best_score = category, score
+    return best
 
 
 def from_response(
@@ -324,7 +374,7 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         title=title,
         category=category,
         summary="",
-        document_date=parse_date(text[:4000]),
+        document_date=parse_date(text[:4000], config.dates.day_first),
         confidence=0.2,
         classifier="heuristic",
         title_source=title_source,

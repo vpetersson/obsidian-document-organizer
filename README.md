@@ -327,6 +327,7 @@ real one. To review the guesses in Obsidian, search `date_source: "file-created"
 ```toml
 [dates]
 fallbacks = ["filename", "pdf-metadata", "file-created"]
+day_first = true     # 03/04/2024 is the 3rd of April; set false for the US reading
 ```
 
 Reorder that list to change precedence, or set it to `[]` to leave undated
@@ -398,9 +399,14 @@ year_tag = true
 correspondent_tag = true
 subject_tags = true
 max_tags = 12
-# Adding a group leaves the built-in ones alone; assigning `rules` replaces them.
-# rules = { boat = ["mooring", "marina", "hamnavgift"] }
+review_below = 0.5   # below this confidence the note is tagged needs-review
+# `extra_rules` adds to the built-in table; `rules` replaces it outright.
+extra_rules = { boat = ["mooring", "marina", "hamnavgift"] }
 ```
+
+Anything the model was unsure about, or that never reached the model at all, is
+tagged `needs-review` — so the weak results are one search away rather than
+something you find by accident months later.
 
 Categories are a separate list — `Invoices`, `Receipts`, `Contracts`, `Banking`,
 `Investments`, `Pensions`, `Loans`, `Taxes`, `Insurance`, `Medical`,
@@ -522,7 +528,7 @@ CLI flags win over the file.
 ```toml
 source_dir = "~/Scans/inbox"
 vault_dir  = "~/Obsidian/Archive"
-language_hint = "English"          # language for generated titles/summaries
+language_hint = "auto"             # "auto" keeps each document's own language
 # categories = [...]               # the classifier may only choose from this list
 
 [ocr]

@@ -72,6 +72,8 @@ class DateConfig:
     """
 
     fallbacks: list[str] = field(default_factory=lambda: list(DATE_SOURCES))
+    # 03/04/2024 is the 3rd of April here and the 4th of March in the US.
+    day_first: bool = True
 
 
 # Keyword -> tag rules applied on top of whatever the model returns, so a
@@ -198,7 +200,21 @@ class TagConfig:
     # Tag what the document is about - a property, a vehicle, an account.
     subject_tags: bool = True
     max_tags: int = 12
-    rules: dict[str, list[str]] = field(default_factory=lambda: {k: list(v) for k, v in DEFAULT_TAG_RULES.items()})
+    # Below this confidence the note is tagged `needs-review`.
+    review_below: float = 0.5
+    rules: dict[str, list[str]] = field(
+        default_factory=lambda: {k: list(v) for k, v in DEFAULT_TAG_RULES.items()}
+    )
+    # Merged on top of `rules`, so you can add a group - or more keywords to an
+    # existing one - without restating the built-in table.
+    extra_rules: dict[str, list[str]] = field(default_factory=dict)
+
+    def all_rules(self) -> dict[str, list[str]]:
+        merged = {tag: list(keywords) for tag, keywords in self.rules.items()}
+        for tag, keywords in self.extra_rules.items():
+            merged.setdefault(tag, [])
+            merged[tag].extend(k for k in keywords if k not in merged[tag])
+        return merged
 
 
 @dataclass
@@ -284,7 +300,8 @@ class Config:
     source_dir: Path | None = None
     vault_dir: Path | None = None
     categories: list[str] = field(default_factory=lambda: list(DEFAULT_CATEGORIES))
-    language_hint: str = "English"
+    # "auto" keeps each document's own language for its title and summary.
+    language_hint: str = "auto"
     ocr: OcrConfig = field(default_factory=OcrConfig)
     dates: DateConfig = field(default_factory=DateConfig)
     tags: TagConfig = field(default_factory=TagConfig)

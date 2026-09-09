@@ -55,16 +55,25 @@ def sha256_file(path: Path, chunk_size: int = 1 << 20) -> str:
     return digest.hexdigest()
 
 
-_DATE_PATTERNS = (
-    (re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b"), (1, 2, 3)),
-    (re.compile(r"\b(\d{4})/(\d{2})/(\d{2})\b"), (1, 2, 3)),
-    (re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\b"), (3, 1, 2)),
-    (re.compile(r"\b(\d{2})\.(\d{2})\.(\d{4})\b"), (3, 2, 1)),
-)
+_ISO_DATE = re.compile(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b")
+# 03/04/2024, 3.4.2024, 13-04-2024 - the order of the first two is a guess.
+_LITTLE_ENDIAN = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
 
 
-def parse_date(value: object) -> date | None:
-    """Best-effort date parsing for whatever the model or a filename gives us."""
+def _safe_date(year: int, month: int, day: int) -> date | None:
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
+def parse_date(value: object, day_first: bool = True) -> date | None:
+    """Best-effort date parsing for whatever the model or a filename gives us.
+
+    `03/04/2024` is genuinely ambiguous, so the caller says which way round it
+    reads; either way `13/04/2024` is the 13th, because the other reading is not
+    a date at all. Getting that wrong used to mean the document had no date.
+    """
     if isinstance(value, datetime):
         return value.date()
     if isinstance(value, date):
@@ -74,13 +83,23 @@ def parse_date(value: object) -> date | None:
     text = value.strip()
     if not text:
         return None
-    for pattern, (y, m, d) in _DATE_PATTERNS:
-        match = pattern.search(text)
-        if match:
-            try:
-                return date(int(match.group(y)), int(match.group(m)), int(match.group(d)))
-            except ValueError:
-                continue
+
+    match = _ISO_DATE.search(text)
+    if match:
+        found = _safe_date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        if found:
+            return found
+
+    match = _LITTLE_ENDIAN.search(text)
+    if match:
+        first, second, year = (int(match.group(index)) for index in (1, 2, 3))
+        orders = [(first, second), (second, first)]
+        if not day_first:
+            orders.reverse()
+        for day, month in orders:
+            found = _safe_date(year, month, day)
+            if found:
+                return found
     return None
 
 
@@ -103,13 +122,6 @@ _DAY_FIRST = re.compile(
 )
 # "2016-09-08", "2016_09_08"
 _ISO_LOOSE = re.compile(r"(?<!\d)(\d{4})[._-](\d{2})[._-](\d{2})(?!\d)")
-
-
-def _safe_date(year: int, month: int, day: int) -> date | None:
-    try:
-        return date(year, month, day)
-    except ValueError:
-        return None
 
 
 def date_from_filename(name: str) -> date | None:
