@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .cache import ClassificationCache
-from .config import Config
+from .config import GENERIC_CATEGORIES, Config
 from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
 from .util import (
@@ -226,6 +226,38 @@ def _clean_tags(raw: Any, config: Config, meta_extra: list[str]) -> list[str]:
     return tags[: max(len(config.tags.base) + len(meta_extra), config.tags.max_tags)]
 
 
+def _haystacks(meta: DocumentMeta, text: str) -> tuple[str, ...]:
+    return (meta.title, meta.correspondent, meta.summary, text[:4000])
+
+
+def category_from_rules(meta: DocumentMeta, config: Config, text: str = "") -> str:
+    """Let a keyword rule name the category when nothing better is on offer.
+
+    "Mortgage Charges Tariff" filed as Correspondence is technically not wrong
+    and completely useless - the word is in the title. But an invoice that
+    happens to quote an IBAN is still an invoice, so a keyword found only in the
+    body never overrules a category that came from the model.
+    """
+    if not config.tags.rules_set_category:
+        return meta.category
+
+    def first_mapped(tags: list[str]) -> str | None:
+        for tag in tags:
+            candidate = config.tags.tag_categories.get(tag)
+            if candidate and candidate in config.categories:
+                return candidate
+        return None
+
+    if meta.category in GENERIC_CATEGORIES:
+        # Nothing to lose: anything specific beats "Correspondence".
+        return first_mapped(rule_tags(config, *_haystacks(meta, text))) or meta.category
+    if meta.classifier != "llm":
+        # A heuristic category is a guess from a word list. A keyword in the
+        # title is a better guess; one buried in the body is not.
+        return first_mapped(rule_tags(config, meta.title)) or meta.category
+    return meta.category
+
+
 def derived_tags(meta: DocumentMeta, config: Config, text: str = "") -> list[str]:
     """Everything we can tag without asking the model: category, year, sender,
     what the document is about, and whatever the keyword rules match."""
@@ -236,7 +268,7 @@ def derived_tags(meta: DocumentMeta, config: Config, text: str = "") -> list[str
         derived.append(slugify(meta.correspondent, max_length=40))
     if config.tags.subject_tags:
         derived.extend(slugify(subject, max_length=40) for subject in meta.subjects[:3])
-    derived.extend(rule_tags(config, meta.title, meta.correspondent, meta.summary, text[:4000]))
+    derived.extend(rule_tags(config, *_haystacks(meta, text)))
     if meta.classifier != "llm" or (
         meta.confidence is not None and meta.confidence < config.tags.review_below
     ):
@@ -308,6 +340,7 @@ def from_response(
         currency=str(data.get("currency") or "").strip()[:8],
         confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
     )
+    meta.category = category_from_rules(meta, config, text)
     meta.tags = _clean_tags(data.get("tags"), config, derived_tags(meta, config, text))
     return meta
 
@@ -343,6 +376,14 @@ def resolve_date(meta: DocumentMeta, source: Path | None, config: Config) -> Doc
     return meta
 
 
+# Words that suggest a line names the document rather than its sender.
+DOCUMENT_WORDS = re.compile(
+    r"\b(invoice|receipt|statement|tariff|notice|letter|certificate|agreement|"
+    r"contract|bill|policy|summary|confirmation|reminder|payslip|declaration|"
+    r"faktura|kvitto|besked|intyg|avtal|beslut|underrättelse)\b",
+    re.IGNORECASE,
+)
+
 HEURISTIC_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Invoices", ("invoice", "faktura", "rechnung", "amount due", "bill to")),
     ("Receipts", ("receipt", "kvitto", "thank you for your purchase", "subtotal")),
@@ -365,9 +406,14 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         if candidate in config.categories and any(word in lowered for word in keywords):
             category = candidate
             break
-    first_line = next(
-        (line.strip() for line in text.splitlines() if len(line.strip()) > 8), ""
+    lines = [line.strip() for line in text.splitlines()[:20] if len(line.strip()) > 8]
+    # "EXAMPLE BANK PLC" is the letterhead; "Mortgage Charges Tariff" is the
+    # document, and it is usually a line or two below it.
+    titled = next(
+        (line for line in lines if DOCUMENT_WORDS.search(line)),
+        "",
     )
+    first_line = titled or (lines[0] if lines else "")
     title = (first_line[:80] or fallback_title).strip()
     title_source = "text" if first_line else "filename"
     meta = DocumentMeta(
@@ -379,6 +425,7 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         classifier="heuristic",
         title_source=title_source,
     )
+    meta.category = category_from_rules(meta, config, text)
     meta.tags = _clean_tags(["unclassified"], config, derived_tags(meta, config, text))
     return meta
 

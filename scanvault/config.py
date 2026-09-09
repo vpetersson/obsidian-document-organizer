@@ -127,12 +127,13 @@ DEFAULT_TAG_RULES: dict[str, list[str]] = {
         "föreningsstämma", "brf", "energy performance certificate", "survey report",
     ],
     "insurance": [
-        "policy number", "insurance certificate", "premium", "no claims", "försäkring",
+        "policy number", "insurance certificate", "insurance premium", "premium due",
+        "no claims", "försäkring",
         "hemförsäkring", "trafikförsäkring", "claim reference", "excess payable", "renewal notice",
     ],
     "utilities": [
         "electricity", "gas supply", "water and wastewater", "broadband", "meter reading",
-        "energy bill", "tariff", "elräkning", "fjärrvärme", "avfallshantering", "standing charge",
+        "energy bill", "energy tariff", "unit rate", "elräkning", "fjärrvärme", "avfallshantering", "standing charge",
     ],
     "telecoms": [
         "mobile bill", "sim only", "line rental", "mobilabonnemang", "bredband",
@@ -177,7 +178,8 @@ DEFAULT_TAG_RULES: dict[str, list[str]] = {
         "annual membership", "gym membership", "licence fee",
     ],
     "warranty": [
-        "warranty", "guarantee", "garanti", "proof of purchase", "extended cover",
+        "warranty", "guarantee certificate", "guarantee period", "garanti",
+        "proof of purchase", "extended cover",
         "return policy", "kvitto sparas",
     ],
     "charity": ["gift aid", "donation receipt", "gåvobevis", "charity number", "sponsorship"],
@@ -186,6 +188,37 @@ DEFAULT_TAG_RULES: dict[str, list[str]] = {
         "quotation for", "offert", "builder", "renovation", "installation certificate",
         "gas safety", "electrical certificate", "byggnadsarbete", "hantverkare",
     ],
+}
+
+
+# When the model puts a document in a generic bucket but a keyword rule knows
+# what it is, the rule wins. Only these buckets are overridable.
+GENERIC_CATEGORIES = ("Other", "Correspondence", "Personal")
+
+# Which category a rule tag implies, for exactly that case.
+DEFAULT_TAG_CATEGORIES: dict[str, str] = {
+    "mortgage": "Loans",
+    "loan": "Loans",
+    "student-loan": "Loans",
+    "pension": "Pensions",
+    "investments": "Investments",
+    "taxes": "Taxes",
+    "government": "Government",
+    "property": "Property",
+    "insurance": "Insurance",
+    "utilities": "Utilities",
+    "telecoms": "Utilities",
+    "banking": "Banking",
+    "vehicle": "Vehicle",
+    "medical": "Medical",
+    "employment": "Employment",
+    "education": "Education",
+    "identity": "Identity",
+    "legal": "Legal",
+    "travel": "Travel",
+    "subscription": "Subscriptions",
+    "warranty": "Receipts",
+    "home-improvement": "Property",
 }
 
 
@@ -202,6 +235,12 @@ class TagConfig:
     max_tags: int = 12
     # Below this confidence the note is tagged `needs-review`.
     review_below: float = 0.5
+    # Let a keyword rule pick the category when the model reached for a generic
+    # one. A mortgage tariff is not "Correspondence".
+    rules_set_category: bool = True
+    tag_categories: dict[str, str] = field(
+        default_factory=lambda: dict(DEFAULT_TAG_CATEGORIES)
+    )
     rules: dict[str, list[str]] = field(
         default_factory=lambda: {k: list(v) for k, v in DEFAULT_TAG_RULES.items()}
     )

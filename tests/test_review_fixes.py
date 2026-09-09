@@ -161,3 +161,62 @@ class TestTagRulesMerge(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestObviousDocumentsAreClassified(unittest.TestCase):
+    """A bank's mortgage tariff is a mortgage document, not correspondence."""
+
+    TARIFF = (
+        "EXAMPLE BANK PLC\n"
+        "Mortgage Charges Tariff\n"
+        "Effective 4 January 2024\n"
+        "This tariff sets out the fees that may apply to your mortgage account.\n"
+        "Early repayment charge, product fee, valuation fee, redemption fee.\n"
+    )
+    INVOICE = (
+        "ACME LTD\n"
+        "INVOICE 2024-05-02\n"
+        "Invoice number: INV-1234\n"
+        "Amount due: 120.00 EUR\n"
+        "Bank transfer to IBAN GB29 NWBK 6016 1331 9268 19.\n"
+    )
+
+    def setUp(self):
+        self.config = load_config()
+
+    def test_a_generic_category_gives_way_to_the_keyword(self):
+        client = StubClient(
+            {"title": "Mortgage Charges Tariff", "category": "Correspondence", "confidence": 0.8}
+        )
+        meta = classify(self.TARIFF, self.config, client)
+        self.assertEqual(meta.category, "Loans")
+        self.assertIn("mortgage", meta.tags)
+        self.assertIn("loans", meta.tags, "the tag follows the category it ended up in")
+
+    def test_the_heuristic_path_gets_there_too(self):
+        meta = classify(self.TARIFF, self.config, None)
+        self.assertEqual(meta.category, "Loans")
+        self.assertEqual(meta.title, "Mortgage Charges Tariff", "not the letterhead")
+
+    def test_a_keyword_in_the_body_does_not_overrule_a_real_category(self):
+        # The invoice mentions an IBAN; it is still an invoice.
+        client = StubClient({"title": "Acme Invoice", "category": "Invoices", "confidence": 0.9})
+        self.assertEqual(classify(self.INVOICE, self.config, client).category, "Invoices")
+        self.assertEqual(classify(self.INVOICE, self.config, None).category, "Invoices")
+
+    def test_the_override_can_be_switched_off(self):
+        self.config.tags.rules_set_category = False
+        client = StubClient(
+            {"title": "Mortgage Charges Tariff", "category": "Correspondence", "confidence": 0.8}
+        )
+        self.assertEqual(classify(self.TARIFF, self.config, client).category, "Correspondence")
+
+    def test_a_tariff_is_not_a_utility_bill(self):
+        meta = classify(self.TARIFF, self.config, None)
+        self.assertNotIn("utilities", meta.tags)
+
+    def test_other_over_broad_keywords_were_tightened(self):
+        from scanvault.classify import rule_tags
+
+        for text in ("premium bond statement", "premium economy ticket", "we guarantee your deposit"):
+            self.assertEqual(rule_tags(self.config, text), [], text)

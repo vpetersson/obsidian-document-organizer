@@ -404,6 +404,13 @@ review_below = 0.5   # below this confidence the note is tagged needs-review
 extra_rules = { boat = ["mooring", "marina", "hamnavgift"] }
 ```
 
+When the model reaches for a generic category — `Correspondence`, `Personal`,
+`Other` — but a keyword rule knows better, the rule wins: a bank's *Mortgage
+Charges Tariff* is filed under `Loans`, not filed as correspondence. A keyword
+found only in the body never overrules a real category, so an invoice that
+quotes an IBAN is still an invoice. `[tags] rules_set_category = false` turns
+that off, and `tag_categories` is the mapping.
+
 Anything the model was unsure about, or that never reached the model at all, is
 tagged `needs-review` — so the weak results are one search away rather than
 something you find by accident months later.
