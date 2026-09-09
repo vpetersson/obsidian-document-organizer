@@ -181,6 +181,7 @@ class Vault:
             "category": meta.category,
             "correspondent": meta.correspondent,
             "tags": meta.tags,
+            "subjects": meta.subjects,
             "reference": meta.reference,
             "amount": meta.amount,
             "currency": meta.currency,
@@ -313,6 +314,9 @@ class Vault:
             title_source=str(data.get("title_source") or "model"),
             correspondent=str(data.get("correspondent") or ""),
             tags=[str(t) for t in tags] if isinstance(tags, list) else [],
+            subjects=[
+                str(item) for item in (data.get("subjects") or []) if isinstance(item, str)
+            ],
             reference=str(data.get("reference") or ""),
             classifier=str(data.get("classifier") or ""),
             para=str(data.get("para") or "") or self.config.vault.para.default_bucket,

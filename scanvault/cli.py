@@ -43,6 +43,13 @@ temperature = 0.0
 num_ctx = 8192
 fallback_to_heuristics = true
 
+[tags]
+year_tag = true            # add year-2024 so a year's paperwork is one search
+correspondent_tag = true   # add the sender as a tag
+subject_tags = true        # add what the document is about (property, vehicle...)
+max_tags = 12
+# rules = { boat = ["mooring", "marina"] }   # extends the built-in keyword rules
+
 [vault]
 notes_dir = ""          # PARA folders live at the vault root
 attachments_dir = ""

@@ -182,7 +182,11 @@ correspondent: "Acme Ltd"
 tags:
   - scan
   - invoices
+  - year-2024
+  - acme-ltd
   - acme
+subjects:
+  - "Account 4242"
 reference: "INV-1234"
 amount: "120.00"
 currency: "EUR"
@@ -318,6 +322,55 @@ fallbacks = ["filename", "pdf-metadata", "file-created"]
 
 Reorder that list to change precedence, or set it to `[]` to leave undated
 documents in the `undated` folder rather than guessing.
+
+## Tags
+
+A document is only as findable as its tags, so they come from three places and
+the first two do not depend on the model getting it right:
+
+* **Rules.** Keyword rules run over the title, the sender, the summary and the
+  start of the text. A letter from HMRC, Skatteverket, the IRS or a Finanzamt is
+  tagged `taxes` whether or not the model thought to; council, DVLA, Companies
+  House and the like are tagged `government`; `mortgage`, `property`,
+  `insurance`, `utilities`, `banking`, `vehicle`, `medical`, `employment` and
+  `education` work the same way. The whole table lives in `[tags] rules` and is
+  yours to edit.
+* **Facts.** The category, the year (`year-2024`), the sender
+  (`example-bank`), and whatever the document is *about* — a property address, a
+  vehicle, an account holder — which the model returns as `subjects` and which
+  become tags too.
+* **The model.** Whatever else it thinks is worth tagging, filling the list up
+  to `max_tags`.
+
+So a mortgage statement ends up with something like:
+
+```yaml
+tags:
+  - scan
+  - property
+  - year-2024
+  - example-bank
+  - 12-example-street
+  - mortgage
+  - statement
+subjects:
+  - "12 Example Street"
+```
+
+which means searching `mortgage` finds every mortgage document, searching
+`12-example-street` finds everything about that property, and `taxes year-2023`
+finds a year's tax paperwork regardless of who sent it.
+
+```toml
+[tags]
+year_tag = true
+correspondent_tag = true
+subject_tags = true
+max_tags = 12
+# rules = { taxes = ["hmrc", "skatteverket"], boat = ["mooring", "marina"] }
+```
+
+Existing notes pick this up with `organize --reclassify --apply`.
 
 ## Naming a document
 
