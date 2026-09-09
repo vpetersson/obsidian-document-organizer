@@ -13,7 +13,7 @@ from .config import Config
 from .extract import OcrError, extract
 from .llm import OllamaClient
 from .state import State
-from .util import sha256_file
+from .util import sha256_file, slugify
 from .vault import Vault
 
 log = logging.getLogger(__name__)
@@ -62,6 +62,17 @@ def iter_pdfs(source: Path, recursive: bool = True) -> Iterator[Path]:
         yield path
 
 
+def source_folder(path: Path, root: Path | None) -> str:
+    """The document's folder relative to `root`, e.g. "WireLoad receipts"."""
+    if root is None:
+        return ""
+    try:
+        relative = path.parent.resolve().relative_to(root.resolve())
+    except ValueError:
+        return ""
+    return "" if relative == Path(".") else relative.as_posix()
+
+
 def is_stable(path: Path, settle_seconds: float = 2.0) -> bool:
     """True when the file stopped growing - a scanner may still be writing it."""
     try:
@@ -80,10 +91,13 @@ def process_file(
     state: State | None = None,
     dry_run: bool = False,
     bucket: str | None = None,
+    source_root: Path | None = None,
 ) -> ProcessResult:
     """OCR one PDF, classify it, and file it in the vault.
 
     `bucket` pins the PARA destination; without it a scan lands in the archive.
+    `source_root` is what the document's folder is recorded relative to, so an
+    existing folder tree survives as metadata after the file moves.
     """
     digest = sha256_file(path)
     if state is not None:
@@ -104,8 +118,15 @@ def process_file(
 
     meta = classify(extracted.text, config, client, source=path)
     meta.para = bucket or config.vault.para.default_bucket
+    folder = source_folder(path, source_root)
+    if folder and config.vault.tag_source_folder:
+        for part in folder.split("/"):
+            tag = slugify(part)
+            if tag and tag not in meta.tags:
+                meta.tags.append(tag)
     extra = {
         "source_file": path.name,
+        "source_folder": folder,
         "source_hash": digest,
         "ocr": extracted.backend,
         "pages": extracted.pages,
@@ -165,7 +186,11 @@ def ingest(
     report = Report()
     for path in paths:
         log.info("processing %s", path)
-        report.results.append(process_file(path, config, vault, client, state, dry_run))
+        report.results.append(
+            process_file(
+                path, config, vault, client, state, dry_run, source_root=config.source_dir
+            )
+        )
     if state is not None and not dry_run:
         state.save()
     return report

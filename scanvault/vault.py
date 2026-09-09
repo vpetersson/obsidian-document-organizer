@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
+from urllib.parse import unquote
 
 from . import __version__
 from .classify import DocumentMeta
@@ -18,6 +19,14 @@ from .util import parse_date, safe_filename, unique_path
 log = logging.getLogger(__name__)
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
+# `![[file.pdf]]`, `[[folder/file.pdf|label]]` and `[label](folder/file.pdf)`
+WIKILINK_RE = re.compile(r"!?\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]")
+MDLINK_RE = re.compile(r"\]\(<?([^)>\s]+)>?\)")
+
+
+def link_targets(body: str) -> list[str]:
+    """Every link target in a note body, wiki-style or markdown-style."""
+    return WIKILINK_RE.findall(body) + MDLINK_RE.findall(body)
 
 
 def _quote(value: str) -> str:
@@ -254,19 +263,39 @@ class Vault:
                 continue
             yield path
 
+    def _record_link(self, target: str, paths: set[Path], names: set[str]) -> None:
+        target = unquote(target.strip())
+        if not target.lower().endswith(".pdf"):
+            return
+        # Obsidian's shortest-path links carry no folder, so a bare filename has
+        # to count too. Matching too eagerly only means we leave a PDF alone.
+        names.add(Path(target).name)
+        if "/" in target:
+            paths.add((self.root / target).resolve())
+
     def iter_loose_pdfs(self) -> Iterator[Path]:
-        """PDFs sitting in the vault that no note points at yet."""
-        linked = set()
+        """PDFs in the vault that no note points at - by frontmatter or by link.
+
+        Notes written by hand embed their PDFs with `![[...]]` rather than an
+        `attachment:` key; treating those as loose would file a second copy and
+        break the link.
+        """
+        linked_paths: set[Path] = set()
+        linked_names: set[str] = set()
         for note in self.iter_notes():
-            data, _ = parse_frontmatter(note.read_text(encoding="utf-8", errors="replace"))
+            data, body = parse_frontmatter(note.read_text(encoding="utf-8", errors="replace"))
             attachment = data.get("attachment")
             if isinstance(attachment, str):
-                linked.add((self.root / attachment).resolve())
+                self._record_link(attachment, linked_paths, linked_names)
+            for target in link_targets(body):
+                self._record_link(target, linked_paths, linked_names)
+
         for path in sorted(self.root.rglob("*.pdf")):
             if any(part.startswith(".") for part in path.relative_to(self.root).parts):
                 continue
-            if path.resolve() not in linked:
-                yield path
+            if path.resolve() in linked_paths or path.name in linked_names:
+                continue
+            yield path
 
     def read_note(self, path: Path) -> tuple[dict[str, Any], str]:
         return parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))

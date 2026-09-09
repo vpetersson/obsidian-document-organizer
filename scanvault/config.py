@@ -35,8 +35,13 @@ class OcrConfig:
     # "auto" picks ocrmypdf, then tesseract, then gives up.
     backend: str = "auto"
     languages: str = "eng"
-    # Below this many extracted characters a PDF counts as image-only.
+    # Below this many extracted characters a PDF counts as image-only, i.e.
+    # worth OCR'ing when it first arrives.
     min_text_chars: int = 180
+    # A PDF that already carries this much text has been OCR'd (or was born
+    # digital). Kept low on purpose: a receipt's whole text layer is 50
+    # characters, and re-OCR'ing it on every organize run is pure waste.
+    searchable_min_chars: int = 10
     # Re-OCR even when a text layer is present.
     force: bool = False
     rotate_pages: bool = True
@@ -110,6 +115,9 @@ class VaultConfig:
     source_action: str = "move"
     # Extra tags added to every note.
     base_tags: list[str] = field(default_factory=lambda: ["scan"])
+    # Turn the folder a document came from into tags, so an existing folder
+    # tree ("WireLoad receipts/To expense") survives the move into PARA.
+    tag_source_folder: bool = True
     max_tags: int = 8
     # Embed the OCR text in the note so Obsidian search can reach it.
     include_text: bool = True

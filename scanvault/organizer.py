@@ -21,7 +21,7 @@ from .extract import OcrError, available_backend, extract, pdf_text
 from .llm import OllamaClient
 from .pipeline import process_file
 from .state import State
-from .util import unique_path
+from .util import sha256_file, unique_path
 from .vault import Vault
 
 log = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ class Action:
                 return str(p)
 
         moved = self.target is not None and self.target != self.path
-        if self.kind in ("relocate", "adopt") or (self.kind == "ocr" and moved):
+        if moved and self.kind in ("relocate", "adopt", "ocr"):
             return f"{self.kind}: {rel(self.path)} -> {rel(self.target)} ({self.reason})"
         return f"{self.kind}: {rel(self.path)} ({self.reason})"
 
@@ -93,11 +93,15 @@ def attachment_path(vault: Vault, frontmatter: dict[str, Any]) -> Path | None:
 
 
 def attachment_needs_ocr(vault: Vault, frontmatter: dict[str, Any], config: Config) -> bool:
-    """True when the note's PDF is image-only, i.e. not searchable yet."""
+    """True when the note's PDF has no text layer at all.
+
+    The bar here is "is it searchable", not `min_text_chars` - a short receipt
+    is a legitimately tiny but perfectly searchable document.
+    """
     attachment = attachment_path(vault, frontmatter)
     if attachment is None or attachment.suffix.lower() != ".pdf":
         return False
-    return len(pdf_text(attachment)) < config.ocr.min_text_chars
+    return len(pdf_text(attachment)) < config.ocr.searchable_min_chars
 
 
 def resolve_bucket(vault: Vault, note: Path, frontmatter: dict[str, Any], config: Config) -> str:
@@ -194,8 +198,31 @@ def plan(
         report.actions.append(Action("relocate", note, target, reason, meta, frontmatter, text))
 
     if adopt:
+        known_hashes = State(config.state_root).documents
         for pdf in vault.iter_loose_pdfs():
-            report.actions.append(Action("adopt", pdf, None, "no note points at this PDF"))
+            filed = known_hashes.get(sha256_file(pdf))
+            if filed:
+                # Same bytes as a document already in the vault: a second copy
+                # would be noise, so report it and leave the file where it is.
+                report.actions.append(
+                    Action("duplicate", pdf, None, f"same content as {filed.get('note')}")
+                )
+                continue
+            destination = vault.para_folder(
+                vault.bucket_from_path(pdf) or config.vault.para.default_bucket
+            )
+            action = Action("adopt", pdf, None, "")
+            if ocr and len(pdf_text(pdf)) < config.ocr.searchable_min_chars:
+                action.needs_ocr = True
+                action.reason = f'image-only PDF; will OCR, classify and file under "{destination}"'
+                if backend == "none":
+                    action.reason = (
+                        f'image-only PDF; NO OCR BACKEND INSTALLED, would file under "{destination}" '
+                        "with no text"
+                    )
+            else:
+                action.reason = f'unfiled PDF; will classify and file under "{destination}"'
+            report.actions.append(action)
     return report
 
 
@@ -271,12 +298,20 @@ def apply(
 
     for action in report.actions:
         try:
-            if action.kind in ("noop", "skipped", "failed"):
+            if action.kind in ("noop", "skipped", "duplicate", "failed"):
                 continue
 
             if action.kind == "adopt":
                 bucket = vault.bucket_from_path(action.path)
-                result = process_file(action.path, config, vault, client, state, bucket=bucket)
+                result = process_file(
+                    action.path,
+                    config,
+                    vault,
+                    client,
+                    state,
+                    bucket=bucket,
+                    source_root=vault.root,
+                )
                 if result.status == "failed":
                     action.kind, action.error = "failed", result.error
                 else:
