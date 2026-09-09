@@ -13,7 +13,9 @@ dependencies = []
 
 [project.optional-dependencies]
 # pypdf gives faster, dependency-free text extraction; poppler's pdftotext is used otherwise.
-fast = ["pypdf>=4.0"]
+fast = [
+    "pypdf>=4.0",
+]
 
 [project.scripts]
 scanvault = "scanvault.cli:main"
