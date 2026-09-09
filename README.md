@@ -113,6 +113,10 @@ System tools:
 sudo apt install ocrmypdf tesseract-ocr poppler-utils
 sudo apt install tesseract-ocr-swe        # one package per extra language
 
+# Order matters: "swe+eng" was measured 3x more accurate than "eng+swe" on
+# Swedish documents, and identical on English ones. Put your main language
+# first. `scanvault doctor` lists any pack you have configured but not installed.
+
 # macOS
 brew install ocrmypdf poppler
 
@@ -371,6 +375,30 @@ a regression test rather than proof of general quality. Point `--corpus` at your
 own labelled JSON — same shape, `id`, `language`, `context`, `category`, `tags`,
 `text` — and the numbers start being about your documents.
 
+## What the classifier is doing, and why
+
+Three layers, in order of how much they can be trusted:
+
+1. **Keyword rules over the text** — 24 groups, English and Swedish, matched on
+   folded text so a document OCR'd without the Swedish language pack
+   (`Forfallodatum` rather than `Förfallodatum`) still matches. Swedish
+   compounds the identifying word into a longer one, so a keyword ending in `*`
+   matches inside a word: `faktur*` catches *faktura*, *fakturanummer* and
+   *fakturadatum*; `forsakring*` catches *Försäkringsbrev*, which is the actual
+   name of a Swedish insurance policy document.
+2. **Facts** — category, year, sender, and what the document is about.
+3. **The model** — for everything the first two cannot see.
+
+A rule only overrules the model's category when the model reached for a generic
+one, and a keyword found in the body never overrules a real category — an
+invoice that quotes an IBAN is still an invoice. Where both fire, what a
+document is *about* wins over what *form* it takes: an electricity bill is an
+invoice, but `Utilities` is the shelf you would look on.
+
+Measured on the bundled corpus with **no model at all**: 87% categories, 100% of
+expected tags. `scanvault eval` reproduces that in a second, and `--model X`
+tells you what the model adds on top.
+
 ## Tags
 
 A document is only as findable as its tags, so they come from three places and
@@ -578,7 +606,7 @@ language_hint = "auto"             # "auto" keeps each document's own language
 
 [ocr]
 backend = "auto"                   # auto | ocrmypdf | tesseract | none
-languages = "eng+swe"
+languages = "swe+eng"
 image_dpi = 300                    # assumed resolution for bare images
 min_text_chars = 180               # a new scan with less text than this is OCR'd
 searchable_min_chars = 10          # a vault PDF with less text than this has no text layer

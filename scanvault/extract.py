@@ -225,6 +225,17 @@ def _tesseract(src: Path, dst: Path, config: OcrConfig) -> str:
     return pdf_text(dst)
 
 
+def missing_language_packs(languages: str) -> list[str]:
+    """Which of the configured tesseract languages are not installed."""
+    if shutil.which("tesseract") is None:
+        return []
+    result = _run(["tesseract", "--list-langs"], 60)
+    installed = {line.strip() for line in result.stdout.splitlines()[1:] if line.strip()}
+    if not installed:
+        return []
+    return [code for code in languages.split("+") if code and code not in installed]
+
+
 def _image_converter() -> str | None:
     """A tool that can turn an odd image format into something OCR can read."""
     for candidate in ("magick", "convert", "heif-convert", "sips"):
