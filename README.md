@@ -164,9 +164,10 @@ scanvault organize --vault ~/Obsidian/Archive
 ```
 [dry-run] ocr: 4 Archive/Invoices/2024/2024-05-02 Acme Invoice.md (attachment has no text layer)
 [dry-run] relocate: 4 Archive/Unsorted/old.md -> 4 Archive/Contracts/2022/2022-02-02 Old Note.md (layout drift)
-[dry-run] adopt: Inbox/scan.pdf (no note points at this PDF)
+[dry-run] adopt: Inbox/scan.pdf (no note points at this PDF; no text layer, will OCR)
 
-1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt, 12 already filed, 3 left alone, 0 failed
+1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt (1 of them need OCR), 12 already filed, 3 left alone, 0 failed
+3 notes were left alone because scanvault did not write them; pass --include-unmanaged to file those too.
 Nothing was changed. Re-run with --apply to execute.
 ```
 
@@ -177,9 +178,14 @@ What each action means:
 | `ocr` | The note's PDF has no text layer. Runs OCR, **replaces the attachment with the searchable PDF**, refreshes the note's extracted text and records the backend in `ocr:`. If the note's metadata was thin, it is classified from the fresh text and refiled. |
 | `relocate` | Moves the note and its PDF to where the templates say they belong. |
 | `rewrite` | Keeps the location, refreshes frontmatter from a new classification. |
-| `adopt` | A PDF in the vault that no note points at: OCR'd, classified and given a note. |
+| `adopt` | A PDF in the vault that no note points at: OCR'd, classified and given a note. The plan says which of them have no text layer. |
 | `already filed` | Nothing to do. |
 | `left alone` | A note scanvault did not write — see below. |
+
+A PDF only counts as loose when **no** note references it — `attachment:` in
+frontmatter, an `![[embed]]`, a `[[wikilink]]` or a markdown link all keep it out
+of the adopt list, so PDFs your own hand-written notes point at are never filed
+a second time.
 
 Planning never runs OCR or moves anything, so a dry run stays cheap and safe;
 the OCR work happens only under `--apply`. Pass `--no-ocr` to skip the OCR pass

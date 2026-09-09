@@ -189,13 +189,22 @@ def cmd_organize(args: argparse.Namespace) -> int:
         print(prefix + action.describe(config.vault_dir))
         if action.error:
             print(f"  error: {action.error}", file=sys.stderr)
+    adopt_ocr = sum(1 for action in report.actions if action.kind == "adopt" and action.needs_ocr)
+    adopt = f"{report.count('adopt')} to adopt"
+    if adopt_ocr:
+        adopt += f" ({adopt_ocr} of them need OCR)"
     summary = (
         f"\n{report.count('ocr')} to OCR, {report.count('relocate')} to relocate, "
-        f"{report.count('rewrite')} to rewrite, {report.count('adopt')} to adopt, "
+        f"{report.count('rewrite')} to rewrite, {adopt}, "
         f"{report.count('noop')} already filed, {report.count('skipped')} left alone, "
         f"{report.count('failed')} failed"
     )
     print(summary if not args.apply else summary.replace("to ", ""))
+    if report.count("skipped"):
+        print(
+            f"{report.count('skipped')} notes were left alone because scanvault did not "
+            "write them; pass --include-unmanaged to file those too."
+        )
     if not args.apply:
         print("Nothing was changed. Re-run with --apply to execute.")
     return 1 if report.count("failed") else 0

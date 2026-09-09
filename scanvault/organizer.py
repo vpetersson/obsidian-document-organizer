@@ -54,7 +54,7 @@ class Action:
                 return str(p)
 
         moved = self.target is not None and self.target != self.path
-        if self.kind in ("relocate", "adopt") or (self.kind == "ocr" and moved):
+        if moved and self.kind in ("relocate", "adopt", "ocr"):
             return f"{self.kind}: {rel(self.path)} -> {rel(self.target)} ({self.reason})"
         return f"{self.kind}: {rel(self.path)} ({self.reason})"
 
@@ -195,7 +195,13 @@ def plan(
 
     if adopt:
         for pdf in vault.iter_loose_pdfs():
-            report.actions.append(Action("adopt", pdf, None, "no note points at this PDF"))
+            action = Action("adopt", pdf, None, "no note points at this PDF")
+            if ocr and len(pdf_text(pdf)) < config.ocr.min_text_chars:
+                action.needs_ocr = True
+                action.reason += "; no text layer, will OCR"
+                if backend == "none":
+                    action.reason += " (no OCR backend installed)"
+            report.actions.append(action)
     return report
 
 

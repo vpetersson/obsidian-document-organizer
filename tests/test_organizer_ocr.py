@@ -134,3 +134,91 @@ class TestOrganizerOcr(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAS_RASTERISER, "needs pdftoppm to build an image-only PDF")
+class TestAdoptReporting(unittest.TestCase):
+    """A loose PDF is where OCR usually happens, so the plan has to say so."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "vault"
+        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.loose = make_scanned_pdf(self.root / "Inbox/scan.pdf", SCAN_LINES)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_adopt_says_the_pdf_will_be_ocrd(self):
+        report = plan(self.config, client=None)
+        action = next(a for a in report.actions if a.kind == "adopt")
+        self.assertTrue(action.needs_ocr)
+        self.assertIn("will OCR", action.reason)
+
+    def test_a_searchable_loose_pdf_is_not_flagged_for_ocr(self):
+        make_text_pdf(
+            self.loose,
+            SCAN_LINES
+            + [
+                "Payment due within 30 days of the invoice date, by bank transfer.",
+                "Acme Ltd, 12 Example Street, London. VAT GB123456789.",
+            ],
+        )
+        action = next(a for a in plan(self.config, client=None).actions if a.kind == "adopt")
+        self.assertFalse(action.needs_ocr)
+        self.assertNotIn("will OCR", action.reason)
+
+
+class TestLinkedPdfsAreNotLoose(unittest.TestCase):
+    """PDFs a hand-written note links to must not be adopted a second time."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "vault"
+        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.vault = Vault(self.config)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def add_pdf(self, relative: str) -> Path:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"%PDF-1.4 fake")
+        return path
+
+    def add_note(self, relative: str, body: str) -> Path:
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_embedded_wikilink(self):
+        self.add_pdf("3 Resources/manual.pdf")
+        self.add_note("3 Resources/Dishwasher.md", "# Dishwasher\n\n![[3 Resources/manual.pdf]]\n")
+        self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
+
+    def test_shortest_path_wikilink_without_folders(self):
+        self.add_pdf("3 Resources/manual.pdf")
+        self.add_note("2 Areas/Home.md", "See [[manual.pdf|the manual]] for details.\n")
+        self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
+
+    def test_markdown_link_with_encoded_spaces(self):
+        self.add_pdf("3 Resources/user manual.pdf")
+        self.add_note("2 Areas/Home.md", "[manual](3%20Resources/user%20manual.pdf)\n")
+        self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
+
+    def test_a_genuinely_unreferenced_pdf_is_still_found(self):
+        self.add_pdf("3 Resources/manual.pdf")
+        self.add_note("3 Resources/Dishwasher.md", "# Dishwasher\n\n![[3 Resources/manual.pdf]]\n")
+        orphan = self.add_pdf("Inbox/scan_001.pdf")
+        self.assertEqual(list(self.vault.iter_loose_pdfs()), [orphan])
+
+    def test_frontmatter_attachments_still_count(self):
+        pdf = self.add_pdf("4 Archive/_attachments/x.pdf")
+        self.add_note(
+            "4 Archive/x.md",
+            '---\ntitle: "x"\nattachment: "4 Archive/_attachments/x.pdf"\n---\n\nno body link\n',
+        )
+        self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
+        self.assertTrue(pdf.is_file())
