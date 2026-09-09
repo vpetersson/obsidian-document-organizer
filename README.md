@@ -1,5 +1,7 @@
 # obsidian-document-organizer
 
+[![CI](https://github.com/vpetersson/obsidian-document-organizer/actions/workflows/ci.yml/badge.svg)](https://github.com/vpetersson/obsidian-document-organizer/actions/workflows/ci.yml)
+
 Turn a scanner's output folder into an organized Obsidian vault. The package and
 CLI are called `scanvault`.
 
@@ -218,6 +220,11 @@ scans are left alone until the printer finishes.
 ```bash
 uv run python -m unittest discover -s tests -t .
 ```
+
+CI runs the same command on every push and pull request across Python 3.11-3.13,
+plus one job with the `fast` extra, on a runner that has `ocrmypdf`, `tesseract`
+and `poppler-utils` installed — so the OCR tests really execute there instead of
+skipping.
 
 The suite is stdlib-only. It builds real PDFs on the fly and stubs the ollama
 client, so it needs neither a model nor an OCR engine; tests that need a PDF text
