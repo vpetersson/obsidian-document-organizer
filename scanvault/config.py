@@ -12,15 +12,22 @@ DEFAULT_CATEGORIES = [
     "Receipts",
     "Contracts",
     "Banking",
+    "Investments",
+    "Pensions",
+    "Loans",
     "Taxes",
     "Insurance",
     "Medical",
     "Government",
+    "Identity",
+    "Legal",
     "Employment",
     "Education",
     "Property",
     "Vehicle",
     "Utilities",
+    "Travel",
+    "Subscriptions",
     "Correspondence",
     "Manuals",
     "Personal",
@@ -69,36 +76,114 @@ class DateConfig:
 
 # Keyword -> tag rules applied on top of whatever the model returns, so a
 # document from a tax authority is tagged `taxes` whether or not the model
-# thought to. Matched case-insensitively against the title, the correspondent
-# and the start of the text.
+# thought to. Matched case-insensitively, on word boundaries, against the title,
+# the correspondent, the summary and the start of the text. Keywords are English
+# and Swedish because that is what this paperwork is in; add your own.
 DEFAULT_TAG_RULES: dict[str, list[str]] = {
     "taxes": [
         "hmrc", "hm revenue", "revenue & customs", "revenue and customs", "self assessment",
         "irs.gov", "internal revenue service", "skatteverket", "inkomstdeklaration",
         "finanzamt", "agenzia delle entrate", "canada revenue agency", "australian taxation",
         "tax return", "corporation tax", "vat return", "capital gains", "paye",
+        "slutskattebesked", "skatteuträkning", "moms", "deklaration", "tax credit",
+        "tax code notice", "p800", "national insurance", "personnummer",
     ],
     "government": [
         "council tax", "borough of", "kommun", "county council", "ministry of", "home office",
         "companies house", "bolagsverket", "land registry", "dvla", "passport office",
         "migrationsverket", "electoral register", "register of electors", "försäkringskassan",
-        "department for", "gov.uk",
+        "department for", "gov.uk", "lantmäteriet", "kronofogden", "polismyndigheten",
+        "folkbokföring", "socialstyrelsen", "transportstyrelsen", "arbetsförmedlingen",
+        "planning permission", "building control",
     ],
-    "mortgage": ["mortgage", "remortgage", "redemption statement", "loan to value", "bolån"],
+    "student-loan": [
+        "csn", "centrala studiestödsnämnden", "studielån", "studiemedel", "återbetalning av lån",
+        "student loans company", "student finance", "tuition fee loan", "maintenance loan",
+        "federal student aid", "fafsa", "nelnet", "navient", "sallie mae", "betalningsplan",
+    ],
+    "pension": [
+        "pension", "tjänstepension", "premiepension", "pensionsmyndigheten", "workplace pension",
+        "auto enrolment", "annuity", "sipp", "401(k)", "ira contribution", "nest pension",
+        "alecta", "amf", "avtalspension", "retirement statement",
+    ],
+    "investments": [
+        "brokerage", "portfolio statement", "dividend", "isk", "investeringssparkonto",
+        "avanza", "nordnet", "fondkonto", "share certificate", "stocks and shares isa",
+        "capital account statement", "vanguard", "index fund", "aktieutdelning",
+    ],
+    "mortgage": [
+        "mortgage", "remortgage", "redemption statement", "loan to value", "bolån",
+        "amorteringskrav", "räntebesked", "fixed rate expiry",
+    ],
+    "loan": [
+        "loan agreement", "credit agreement", "instalment plan", "avbetalning", "blancolån",
+        "personal loan", "hire purchase", "overdraft",
+    ],
     "property": [
         "tenancy", "leasehold", "freehold", "landlord", "estate agent", "service charge",
-        "ground rent", "stamp duty", "conveyanc",
+        "ground rent", "stamp duty", "conveyanc", "hyresavtal", "bostadsrätt",
+        "föreningsstämma", "brf", "energy performance certificate", "survey report",
     ],
-    "insurance": ["policy number", "insurance certificate", "premium", "no claims", "försäkring"],
+    "insurance": [
+        "policy number", "insurance certificate", "premium", "no claims", "försäkring",
+        "hemförsäkring", "trafikförsäkring", "claim reference", "excess payable", "renewal notice",
+    ],
     "utilities": [
         "electricity", "gas supply", "water and wastewater", "broadband", "meter reading",
-        "energy bill", "tariff",
+        "energy bill", "tariff", "elräkning", "fjärrvärme", "avfallshantering", "standing charge",
     ],
-    "banking": ["sort code", "iban", "account statement", "bankgiro", "swift/bic"],
-    "vehicle": ["mot test", "v5c", "vehicle registration", "logbook", "besiktning"],
-    "medical": ["nhs", "patient", "prescription", "vaccination", "vårdcentral", "1177"],
-    "employment": ["payslip", "p60", "p45", "employment contract", "anställningsavtal"],
-    "education": ["tuition", "student loan", "csn", "enrolment", "transcript of records"],
+    "telecoms": [
+        "mobile bill", "sim only", "line rental", "mobilabonnemang", "bredband",
+        "data allowance", "roaming charges",
+    ],
+    "banking": [
+        "sort code", "iban", "account statement", "bankgiro", "swift/bic", "kontoutdrag",
+        "credit card statement", "direct debit", "autogiro", "standing order",
+    ],
+    "vehicle": [
+        "mot test", "v5c", "vehicle registration", "logbook", "besiktning", "bilprovningen",
+        "road tax", "fordonsskatt", "service history", "congestion charge", "parkeringsanmärkning",
+    ],
+    "medical": [
+        "nhs", "patient", "prescription", "vaccination", "vårdcentral", "1177", "remiss",
+        "journalutdrag", "dental", "optician", "referral letter", "sjukintyg",
+    ],
+    "employment": [
+        "payslip", "p60", "p45", "employment contract", "anställningsavtal", "lönespecifikation",
+        "notice period", "probation period", "arbetsgivarintyg", "bonus letter", "share options",
+    ],
+    "education": [
+        "tuition", "enrolment", "transcript of records", "antagningsbesked", "kursintyg",
+        "examensbevis", "diploma", "course certificate", "school report", "terminsbetyg",
+    ],
+    "identity": [
+        "passport", "driving licence", "driver's license", "körkort", "id-kort", "national id",
+        "residence permit", "uppehållstillstånd", "birth certificate", "personbevis",
+        "marriage certificate", "vigselbevis",
+    ],
+    "legal": [
+        "solicitor", "advokat", "power of attorney", "fullmakt", "deed of", "last will",
+        "testamente", "court claim", "claim form", "tingsrätt", "settlement agreement",
+        "bouppteckning", "arvskifte",
+    ],
+    "travel": [
+        "boarding pass", "booking reference", "itinerary", "flight number", "hotel confirmation",
+        "biljett", "resebokning", "car hire", "travel insurance", "visa application",
+    ],
+    "subscription": [
+        "subscription", "membership", "renewal reminder", "medlemskap", "abonnemang",
+        "annual membership", "gym membership", "licence fee",
+    ],
+    "warranty": [
+        "warranty", "guarantee", "garanti", "proof of purchase", "extended cover",
+        "return policy", "kvitto sparas",
+    ],
+    "charity": ["gift aid", "donation receipt", "gåvobevis", "charity number", "sponsorship"],
+    "pets": ["veterinary", "veterinär", "microchip", "pet insurance", "vaccination card"],
+    "home-improvement": [
+        "quotation for", "offert", "builder", "renovation", "installation certificate",
+        "gas safety", "electrical certificate", "byggnadsarbete", "hantverkare",
+    ],
 }
 
 

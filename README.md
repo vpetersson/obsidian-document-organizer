@@ -331,12 +331,34 @@ A document is only as findable as its tags, so they come from three places and
 the first two do not depend on the model getting it right:
 
 * **Rules.** Keyword rules run over the title, the sender, the summary and the
-  start of the text. A letter from HMRC, Skatteverket, the IRS or a Finanzamt is
-  tagged `taxes` whether or not the model thought to; council, DVLA, Companies
-  House and the like are tagged `government`; `mortgage`, `property`,
-  `insurance`, `utilities`, `banking`, `vehicle`, `medical`, `employment` and
-  `education` work the same way. The whole table lives in `[tags] rules` and is
-  yours to edit.
+  start of the text, matching on word boundaries so `payee` is not PAYE and
+  `risk` is not an ISK account. Twenty-four groups ship by default, in English
+  and Swedish:
+
+  | Tag | Some of what it matches |
+  | --- | --- |
+  | `taxes` | HMRC, Skatteverket, IRS, Finanzamt, self assessment, inkomstdeklaration, moms, P800 |
+  | `government` | council tax, Companies House, DVLA, Bolagsverket, Kronofogden, folkbokföring |
+  | `student-loan` | CSN, studiemedel, Student Loans Company, tuition fee loan, FAFSA |
+  | `pension` | workplace pension, tjänstepension, Pensionsmyndigheten, SIPP, 401(k), annuity |
+  | `investments` | portfolio statement, dividend, ISK, fondkonto, stocks and shares ISA |
+  | `mortgage` / `loan` | redemption statement, bolån, amorteringskrav / loan agreement, avbetalning |
+  | `property` | tenancy, leasehold, service charge, hyresavtal, bostadsrätt, stamp duty |
+  | `insurance` | policy number, premium, hemförsäkring, trafikförsäkring, claim reference |
+  | `utilities` / `telecoms` | meter reading, fjärrvärme, standing charge / mobilabonnemang, bredband |
+  | `banking` | sort code, IBAN, kontoutdrag, autogiro, direct debit |
+  | `vehicle` | MOT, V5C, besiktning, fordonsskatt, parkeringsanmärkning |
+  | `medical` | NHS, prescription, 1177, vårdcentral, remiss, sjukintyg |
+  | `employment` | payslip, P60, anställningsavtal, lönespecifikation, share options |
+  | `education` | enrolment, antagningsbesked, examensbevis, transcript of records |
+  | `identity` | passport, körkort, residence permit, uppehållstillstånd, personbevis |
+  | `legal` | solicitor, fullmakt, testamente, claim form, bouppteckning, arvskifte |
+  | `travel` | boarding pass, booking reference, itinerary, resebokning, car hire |
+  | `subscription` / `warranty` | membership, medlemskap, abonnemang / guarantee, garanti |
+  | `charity`, `pets`, `home-improvement` | gift aid, veterinär, microchip, offert, gas safety |
+
+  The whole table lives in `[tags] rules` and is yours to edit — replace a group,
+  add your own, or drop the lot.
 * **Facts.** The category, the year (`year-2024`), the sender
   (`example-bank`), and whatever the document is *about* — a property address, a
   vehicle, an account holder — which the model returns as `subjects` and which
@@ -369,8 +391,17 @@ year_tag = true
 correspondent_tag = true
 subject_tags = true
 max_tags = 12
-# rules = { taxes = ["hmrc", "skatteverket"], boat = ["mooring", "marina"] }
+# Adding a group leaves the built-in ones alone; assigning `rules` replaces them.
+# rules = { boat = ["mooring", "marina", "hamnavgift"] }
 ```
+
+Categories are a separate list — `Invoices`, `Receipts`, `Contracts`, `Banking`,
+`Investments`, `Pensions`, `Loans`, `Taxes`, `Insurance`, `Medical`,
+`Government`, `Identity`, `Legal`, `Employment`, `Education`, `Property`,
+`Vehicle`, `Utilities`, `Travel`, `Subscriptions`, `Correspondence`, `Manuals`,
+`Personal`, `Other` — and they decide the folder a document lands in, so keep
+that list short enough to stay meaningful and set `categories` in the config if
+these are not your filing cabinet.
 
 Existing notes pick this up with `organize --reclassify --apply`.
 

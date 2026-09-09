@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -155,14 +156,40 @@ class DocumentMeta:
         }
 
 
+@lru_cache(maxsize=8)
+def _compiled_rules(rules: tuple[tuple[str, tuple[str, ...]], ...]) -> list[tuple[str, re.Pattern]]:
+    """One regex per tag, matching on word boundaries.
+
+    Substring matching turns "payee" into a tax document and "risk" into an
+    investment one, so keywords have to end where words end.
+    """
+    compiled = []
+    for tag, keywords in rules:
+        if not keywords:
+            continue
+        alternatives = "|".join(re.escape(keyword) for keyword in sorted(keywords, key=len, reverse=True))
+        # The group matters: without it the alternation would bind looser than
+        # the look-arounds and only guard the first and last keyword.
+        compiled.append(
+            (
+                tag,
+                re.compile(
+                    rf"(?<![a-z0-9æøåäöü])(?:{alternatives})(?![a-z0-9æøåäöü])", re.I
+                ),
+            )
+        )
+    return compiled
+
+
 def rule_tags(config: Config, *haystacks: str) -> list[str]:
     """Tags the keyword rules insist on, whatever the model thought.
 
     A letter from a tax authority is about taxes even when the model called it
     "Correspondence", and that is exactly the search someone will run.
     """
-    text = "\n".join(part.lower() for part in haystacks if part)
-    return [tag for tag, keywords in config.tags.rules.items() if any(k in text for k in keywords)]
+    text = "\n".join(part for part in haystacks if part)
+    frozen = tuple((tag, tuple(keywords)) for tag, keywords in config.tags.rules.items())
+    return [tag for tag, pattern in _compiled_rules(frozen) if pattern.search(text)]
 
 
 def _clean_tags(raw: Any, config: Config, meta_extra: list[str]) -> list[str]:
