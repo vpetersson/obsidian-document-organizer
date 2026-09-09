@@ -34,11 +34,22 @@ The point of running this locally is that documents like these — invoices,
 medical letters, bank statements, anything with your address on it — are exactly
 what you do not want in someone else's system.
 
-**What leaves your machine: nothing.** There is one kind of outbound request in
+**What leaves your network: nothing.** There is one kind of outbound request in
 the whole codebase, in `scanvault/llm.py`, and it goes to the ollama host you
-configured. That host must be on this machine: a non-loopback address is refused
-unless you set `allow_remote_host = true` under `[llm]`, because classifying a
-document means sending its text there. `scanvault doctor` prints which it is.
+configured. Classifying a document means sending its text there, so where that
+host lives is the one thing worth checking:
+
+| Host | Treated as | Needs permission |
+| --- | --- | --- |
+| `localhost`, `127.0.0.1`, `[::1]` | this machine | no |
+| `192.168.x`, `10.x`, `172.16-31.x`, `fd00::/8`, link-local | your own network | no |
+| `ollama.local`, `nas.lan`, `box.internal` | your own network | no |
+| a name that resolves onto the public internet | public | yes |
+
+A model server on another box in the house is still your own hardware, so it
+needs no ceremony. A public address is refused unless you set
+`allow_public_host = true` under `[llm]`. `scanvault doctor` prints which of the
+three it is.
 
 There is no analytics, no update check, no crash reporting, and nothing is
 uploaded — not the PDFs, not the OCR text, not the metadata. Disconnect the
@@ -335,8 +346,8 @@ searchable_min_chars = 10          # a vault PDF with less text than this has no
 force = false                      # re-OCR even when a text layer exists
 
 [llm]
-host = "http://localhost:11434"   # must be this machine unless you allow otherwise
-allow_remote_host = false
+host = "http://localhost:11434"   # this machine or your own LAN; public hosts need the flag
+allow_public_host = false
 model = "qwen3.5:9b"
 num_ctx = 8192
 fallback_to_heuristics = true      # keep filing when ollama is down

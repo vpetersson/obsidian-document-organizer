@@ -11,7 +11,7 @@ from pathlib import Path
 from . import __version__
 from .config import CONFIG_FILENAME, Config, find_config, load_config
 from .extract import available_backend, extract, pdf_text
-from .llm import LlmError, OllamaClient, is_loopback
+from .llm import LlmError, OllamaClient, host_scope
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
 from .pipeline import ingest, iter_pdfs, watch
@@ -33,8 +33,8 @@ min_text_chars = 180
 force = false
 
 [llm]
-host = "http://localhost:11434"   # a non-local host is refused unless allowed below
-allow_remote_host = false
+host = "http://localhost:11434"   # this machine or your own LAN; public hosts need the flag below
+allow_public_host = false
 model = "qwen3.5:9b"
 temperature = 0.0
 num_ctx = 8192
@@ -316,7 +316,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except LlmError as exc:
         print(f"ollama      : REFUSED {exc}")
         return 0
-    where = "on this machine" if is_loopback(config.llm.host) else "REMOTE - text leaves this machine"
+    where = {
+        "machine": "on this machine",
+        "network": "on your network - text leaves this machine, not your network",
+    }.get(host_scope(config.llm.host), "PUBLIC INTERNET - text leaves your network")
     print(f"model host  : {config.llm.host} ({where})")
     try:
         models = client.list_models()

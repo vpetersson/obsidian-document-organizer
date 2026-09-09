@@ -6,10 +6,11 @@ import ipaddress
 import json
 import logging
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Callable
 
 from .config import LlmConfig
 
@@ -20,26 +21,75 @@ class LlmError(RuntimeError):
     """Raised when ollama is unreachable or returns something unusable."""
 
 
-def is_loopback(url: str) -> bool:
-    """True when the URL points at this machine."""
-    hostname = (urllib.parse.urlparse(url).hostname or "").lower()
-    if hostname in ("localhost", "localhost.localdomain"):
-        return True
+# Suffixes that only exist inside a home or office network.
+PRIVATE_SUFFIXES = (".local", ".lan", ".internal", ".home.arpa", ".localdomain")
+
+
+def _resolve(hostname: str) -> list[str]:
     try:
-        return ipaddress.ip_address(hostname).is_loopback
+        return [info[4][0] for info in socket.getaddrinfo(hostname, None)]
+    except OSError:
+        return []
+
+
+def host_scope(url: str, resolver: Callable[[str], list[str]] = _resolve) -> str:
+    """Where a URL points: "machine", "network" or "public".
+
+    A model server on your own LAN is still your own hardware, so it counts as
+    private. Anything that resolves onto the public internet does not.
+    """
+    hostname = (urllib.parse.urlparse(url).hostname or "").lower()
+    if not hostname:
+        return "public"
+    if hostname in ("localhost", "localhost.localdomain"):
+        return "machine"
+
+    addresses = [hostname]
+    if not _is_ip(hostname):
+        if hostname.endswith(PRIVATE_SUFFIXES):
+            return "network"
+        addresses = resolver(hostname)
+        if not addresses:
+            return "public"  # unknown, so treat it as the risky case
+
+    scopes = set()
+    for address in addresses:
+        try:
+            ip = ipaddress.ip_address(address.split("%", 1)[0])
+        except ValueError:
+            return "public"
+        if ip.is_loopback:
+            scopes.add("machine")
+        elif ip.is_private or ip.is_link_local:
+            scopes.add("network")
+        else:
+            return "public"
+    return "network" if "network" in scopes else "machine"
+
+
+def _is_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+        return True
     except ValueError:
         return False
+
+
+def is_private_host(url: str, resolver: Callable[[str], list[str]] = _resolve) -> bool:
+    """True when the URL stays on this machine or this network."""
+    return host_scope(url, resolver) != "public"
 
 
 class OllamaClient:
     def __init__(self, config: LlmConfig):
         self.config = config
         self.host = config.host.rstrip("/")
-        if not is_loopback(self.host) and not config.allow_remote_host:
+        if not is_private_host(self.host) and not config.allow_public_host:
             raise LlmError(
-                f"{self.host} is not on this machine, and classifying a document "
-                "means sending its text to it. Set `allow_remote_host = true` "
-                "under [llm] if that is what you want."
+                f"{self.host} is on the public internet, and classifying a document "
+                "means sending its text there. A model server on this machine or on "
+                "your own network needs no permission; for anything else set "
+                "`allow_public_host = true` under [llm]."
             )
 
     def _post(self, path: str, payload: dict[str, Any], timeout: int | None = None) -> dict[str, Any]:
