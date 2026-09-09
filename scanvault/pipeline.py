@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Iterator
 
+from .cache import ClassificationCache
 from .classify import DocumentMeta, classify
 from .config import Config
 from .extract import OcrError, extract
@@ -92,6 +93,7 @@ def process_file(
     dry_run: bool = False,
     bucket: str | None = None,
     source_root: Path | None = None,
+    cache: ClassificationCache | None = None,
 ) -> ProcessResult:
     """OCR one PDF, classify it, and file it in the vault.
 
@@ -116,7 +118,7 @@ def process_file(
         log.exception("unexpected failure on %s", path.name)
         return ProcessResult(path, "failed", error=f"{type(exc).__name__}: {exc}")
 
-    meta = classify(extracted.text, config, client, source=path)
+    meta = classify(extracted.text, config, client, source=path, cache=cache)
     meta.para = bucket or config.vault.para.default_bucket
     folder = source_folder(path, source_root)
     if folder and config.vault.tag_source_folder:
@@ -168,6 +170,8 @@ def ingest(
     client: OllamaClient | None = None,
     dry_run: bool = False,
     use_state: bool = True,
+    cache: ClassificationCache | None = None,
+    use_cache: bool = True,
 ) -> Report:
     """Ingest every PDF under config.source_dir (or an explicit list of paths)."""
     if config.vault_dir is None:
@@ -177,6 +181,9 @@ def ingest(
         vault.root.mkdir(parents=True, exist_ok=True)
         vault.scaffold()
     state = State(config.state_root) if use_state else None
+    own_cache = cache is None
+    if own_cache:
+        cache = ClassificationCache(config.state_root, config, enabled=use_cache)
 
     if paths is None:
         if config.source_dir is None:
@@ -189,11 +196,21 @@ def ingest(
         log.info("[%d/%d] %s", index, len(paths), path.name)
         report.results.append(
             process_file(
-                path, config, vault, client, state, dry_run, source_root=config.source_dir
+                path,
+                config,
+                vault,
+                client,
+                state,
+                dry_run,
+                source_root=config.source_dir,
+                cache=cache,
             )
         )
     if state is not None and not dry_run:
         state.save()
+    if own_cache and cache is not None:
+        # Written even on a dry run: reusing it is the point.
+        cache.save()
     return report
 
 

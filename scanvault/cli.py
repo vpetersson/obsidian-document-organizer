@@ -148,7 +148,12 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         return 0
     preview = is_preview(args)
     report = ingest(
-        config, paths, _client(args, config), dry_run=preview, use_state=not args.no_state
+        config,
+        paths,
+        _client(args, config),
+        dry_run=preview,
+        use_state=not args.no_state,
+        use_cache=not args.no_cache,
     )
 
     for result in report.results:
@@ -232,10 +237,11 @@ def cmd_organize(args: argparse.Namespace) -> int:
         adopt=not args.no_adopt,
         include_unmanaged=args.include_unmanaged,
         ocr=not args.no_ocr,
+        use_cache=not args.no_cache,
     )
     preview = is_preview(args)
     if not preview:
-        organizer_apply(report, config, client)
+        organizer_apply(report, config, client, use_cache=not args.no_cache)
 
     # These say "nothing happens here"; on a real vault they are hundreds of
     # lines that bury the ones that do something. The summary still counts them.
@@ -389,6 +395,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("--keep-source", action="store_true", help="copy instead of moving originals")
     p_ingest.add_argument("--no-recursive", action="store_true")
     p_ingest.add_argument("--no-state", action="store_true", help="ignore the dedupe index")
+    p_ingest.add_argument(
+        "--no-cache", action="store_true", help="ask the model again instead of reusing answers"
+    )
     add_execution_flags(p_ingest)
     add_llm_flags(p_ingest)
     p_ingest.set_defaults(func=cmd_ingest)
@@ -428,6 +437,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-ocr",
         action="store_true",
         help="do not OCR attachments that have no text layer",
+    )
+    p_org.add_argument(
+        "--no-cache", action="store_true", help="ask the model again instead of reusing answers"
     )
     p_org.add_argument(
         "--include-unmanaged",

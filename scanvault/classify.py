@@ -9,6 +9,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .cache import ClassificationCache
 from .config import Config
 from .llm import LlmError, OllamaClient
 from .util import parse_date, slugify, truncate_words
@@ -197,6 +198,7 @@ def classify(
     config: Config,
     client: OllamaClient | None,
     source: Path | None = None,
+    cache: ClassificationCache | None = None,
 ) -> DocumentMeta:
     """Classify one document, degrading to heuristics when configured to."""
     fallback_title = source.stem.replace("_", " ").strip() if source else "Untitled document"
@@ -206,6 +208,11 @@ def classify(
         return meta
     if client is None:
         return heuristic(text, config, fallback_title)
+
+    cached = cache.get(text) if cache is not None else None
+    if cached is not None:
+        return from_response(cached, config, fallback_title)
+
     try:
         data = client.chat_json(
             SYSTEM_PROMPT,
@@ -217,4 +224,6 @@ def classify(
             raise
         log.warning("classification fell back to heuristics: %s", exc)
         return heuristic(text, config, fallback_title)
+    if cache is not None:
+        cache.put(text, data)
     return from_response(data, config, fallback_title)

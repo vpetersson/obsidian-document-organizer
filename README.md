@@ -207,6 +207,24 @@ frontmatter, an `![[embed]]`, a `[[wikilink]]` or a markdown link all keep it ou
 of the adopt list, so PDFs your own hand-written notes point at are never filed
 a second time.
 
+### The model is asked once
+
+Planning classifies every note it is going to touch, and that is a model call
+each. Those answers are cached in `<vault>/.scanvault/classifications.json`, so
+the `--apply` you run after reading the preview reuses them instead of paying for
+the same work again:
+
+```
+INFO classifications: 191 cached, 0 new
+```
+
+The key covers the document's text, the model, the category list and the language
+hint, so switching model or editing a document misses the cache rather than
+returning something stale. `--no-cache` forces fresh answers.
+
+This is the one thing a dry run writes: the cache lives under `.scanvault/`
+inside the vault, never in your documents.
+
 Planning never runs OCR or moves anything, so a dry run stays cheap and safe;
 the OCR work happens only under `--apply`. Pass `--no-ocr` to skip the OCR pass
 entirely, `--reclassify` to re-run the model over every note, and `--no-adopt`
