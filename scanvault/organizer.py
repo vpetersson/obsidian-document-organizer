@@ -15,7 +15,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .classify import DocumentMeta, classify
+from .cache import ClassificationCache
+from .classify import DocumentMeta, classify, resolve_date
 from .config import BUCKETS, Config
 from .extract import OcrError, available_backend, extract, needs_password, pdf_text
 from .llm import OllamaClient
@@ -139,10 +140,15 @@ def plan(
     adopt: bool = True,
     include_unmanaged: bool = False,
     ocr: bool = True,
+    cache: ClassificationCache | None = None,
+    use_cache: bool = True,
 ) -> OrganizeReport:
     """Work out what the vault needs, without touching anything."""
     vault = Vault(config)
     report = OrganizeReport()
+    own_cache = cache is None
+    if own_cache:
+        cache = ClassificationCache(config.state_root, config, enabled=use_cache)
     backend = "none"
     if ocr:
         try:
@@ -190,7 +196,8 @@ def plan(
             # Each of these is a model call, so say which one we are on.
             log.info("[%d/%d] classifying %s", index, len(notes), note.name)
             text = note_text(vault, note, frontmatter, body, config)
-            meta = classify(text, config, client, source=note)
+            meta = classify(text, config, client, source=note, cache=cache)
+            resolve_date(meta, attachment_path(vault, frontmatter) or note, config)
             reason = "reclassified" if reclassify else "incomplete metadata"
         else:
             meta = vault.meta_from_note(frontmatter, note.stem)
@@ -247,6 +254,12 @@ def plan(
             else:
                 action.reason = f'unfiled PDF; will classify and file under "{destination}"'
             report.actions.append(action)
+
+    if own_cache and cache is not None:
+        # Saved even for a dry run, so `--apply` reuses these answers.
+        cache.save()
+    if cache is not None and (cache.hits or cache.misses):
+        log.info("classifications: %s", cache.summary())
     return report
 
 
@@ -268,7 +281,11 @@ def _move_attachment(vault: Vault, frontmatter: dict[str, Any], meta: DocumentMe
 
 
 def _run_ocr(
-    vault: Vault, action: Action, config: Config, client: OllamaClient | None
+    vault: Vault,
+    action: Action,
+    config: Config,
+    client: OllamaClient | None,
+    cache: ClassificationCache | None = None,
 ) -> None:
     """OCR the note's attachment in place, then refresh its metadata and text."""
     pdf = attachment_path(vault, action.frontmatter)
@@ -279,7 +296,8 @@ def _run_ocr(
         # Keep the searchable PDF: that is the point of OCR'ing an old vault.
         shutil.move(str(result.pdf_path), pdf)
     if action.classify_after:
-        action.meta = classify(result.text, config, client, source=action.path)
+        action.meta = classify(result.text, config, client, source=action.path, cache=cache)
+        resolve_date(action.meta, pdf, config)
     else:
         action.meta = vault.meta_from_note(action.frontmatter, action.path.stem)
     action.meta.para = resolve_bucket(vault, action.path, action.frontmatter, config)
@@ -315,10 +333,15 @@ def apply(
     config: Config,
     client: OllamaClient | None = None,
     use_state: bool = True,
+    cache: ClassificationCache | None = None,
+    use_cache: bool = True,
 ) -> OrganizeReport:
     """Execute a plan. Returns the same report with kinds updated to what happened."""
     vault = Vault(config)
     state = State(config.state_root) if use_state else None
+    own_cache = cache is None
+    if own_cache:
+        cache = ClassificationCache(config.state_root, config, enabled=use_cache)
     todo = [
         action
         for action in report.actions
@@ -344,6 +367,7 @@ def apply(
                     state,
                     bucket=bucket,
                     source_root=vault.root,
+                    cache=cache,
                 )
                 if result.status == "failed":
                     action.kind, action.error = "failed", result.error
@@ -352,7 +376,7 @@ def apply(
                 continue
 
             if action.kind == "ocr":
-                _run_ocr(vault, action, config, client)
+                _run_ocr(vault, action, config, client, cache)
                 target = vault.note_path(action.meta)
                 action.target = None if target.resolve() == action.path.resolve() else target
 
@@ -384,6 +408,8 @@ def apply(
 
     if state is not None:
         state.save()
+    if own_cache and cache is not None:
+        cache.save()
     return report
 
 

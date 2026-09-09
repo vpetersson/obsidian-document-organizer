@@ -9,9 +9,11 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .cache import ClassificationCache
 from .config import Config
+from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
-from .util import parse_date, slugify, truncate_words
+from .util import date_from_filename, file_created_date, parse_date, slugify, truncate_words
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +84,9 @@ class DocumentMeta:
     currency: str = ""
     confidence: float | None = None
     classifier: str = "llm"  # "llm" | "heuristic"
+    # Where document_date came from: document | filename | pdf-metadata |
+    # file-created. Empty when the document is undated.
+    date_source: str = ""
     # PARA bucket: project | area | resource | archive. Scans default to the
     # archive; a human moves a note elsewhere by editing its frontmatter.
     para: str = "archive"
@@ -155,6 +160,37 @@ def from_response(data: dict[str, Any], config: Config, fallback_title: str) -> 
     )
 
 
+def resolve_date(meta: DocumentMeta, source: Path | None, config: Config) -> DocumentMeta:
+    """Fill in a missing date from the file itself, in the configured order.
+
+    A date printed on the document always wins. Everything else is a guess, so
+    the note records which guess it was.
+    """
+    if meta.document_date:
+        meta.date_source = "document"
+        return meta
+    if source is None:
+        return meta
+
+    finders = {
+        "filename": lambda path: date_from_filename(path.name),
+        "pdf-metadata": pdf_creation_date,
+        "file-created": file_created_date,
+    }
+    for name in config.dates.fallbacks:
+        finder = finders.get(name)
+        if finder is None:
+            log.warning("unknown date fallback %r; skipping", name)
+            continue
+        found = finder(source)
+        if found:
+            meta.document_date = found
+            meta.date_source = name
+            log.debug("%s: date %s taken from %s", source.name, found, name)
+            return meta
+    return meta
+
+
 HEURISTIC_RULES: list[tuple[str, tuple[str, ...]]] = [
     ("Invoices", ("invoice", "faktura", "rechnung", "amount due", "bill to")),
     ("Receipts", ("receipt", "kvitto", "thank you for your purchase", "subtotal")),
@@ -197,6 +233,7 @@ def classify(
     config: Config,
     client: OllamaClient | None,
     source: Path | None = None,
+    cache: ClassificationCache | None = None,
 ) -> DocumentMeta:
     """Classify one document, degrading to heuristics when configured to."""
     fallback_title = source.stem.replace("_", " ").strip() if source else "Untitled document"
@@ -206,6 +243,11 @@ def classify(
         return meta
     if client is None:
         return heuristic(text, config, fallback_title)
+
+    cached = cache.get(text) if cache is not None else None
+    if cached is not None:
+        return from_response(cached, config, fallback_title)
+
     try:
         data = client.chat_json(
             SYSTEM_PROMPT,
@@ -217,4 +259,6 @@ def classify(
             raise
         log.warning("classification fell back to heuristics: %s", exc)
         return heuristic(text, config, fallback_title)
+    if cache is not None:
+        cache.put(text, data)
     return from_response(data, config, fallback_title)
