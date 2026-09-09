@@ -147,7 +147,8 @@ class TestBucketRouting(unittest.TestCase):
             'tags:\n  - scan\npara: "area"\n' + MANAGED
             + 'attachment: "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf"\n---\n\nbody\n',
         )
-        organizer_apply(plan(self.config, client=None), self.config, client=None)
+        report = plan(self.config, client=None, ocr=False)
+        organizer_apply(report, self.config, client=None)
         moved_note = self.root / "2 Areas/Invoices/2024/2024-05-02 Acme Invoice.md"
         moved_pdf = self.root / "2 Areas/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf"
         self.assertTrue(moved_pdf.is_file())
@@ -230,7 +231,7 @@ class TestLegacyLayoutMigration(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_organize_migrates_notes_and_attachments(self):
-        report = plan(self.config, client=None)
+        report = plan(self.config, client=None, ocr=False)
         self.assertEqual(report.count("relocate"), 1)
         organizer_apply(report, self.config, client=None)
 
