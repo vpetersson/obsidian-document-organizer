@@ -222,3 +222,86 @@ class TestLinkedPdfsAreNotLoose(unittest.TestCase):
         )
         self.assertEqual(list(self.vault.iter_loose_pdfs()), [])
         self.assertTrue(pdf.is_file())
+
+
+class TestDuplicateLoosePdfs(unittest.TestCase):
+    """A second copy of a document already in the vault must not be filed again."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "vault"
+        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.first = self.root / "Receipts/scan.pdf"
+        self.first.parent.mkdir(parents=True, exist_ok=True)
+        make_text_pdf(
+            self.first,
+            [
+                "THE COFFEE HOUSE",
+                "RECEIPT 2017-03-05",
+                "Total 12.40 GBP including VAT of 2.07 GBP, paid by card ending 4242.",
+                "Thank you for visiting. Company number 12345678, VAT GB123456789.",
+            ],
+        )
+        self.copy = self.root / "Receipts/scan copy.pdf"
+        shutil.copyfile(self.first, self.copy)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_identical_copies_are_reported_as_duplicates_after_the_first_is_filed(self):
+        client = StubClient({"title": "Coffee House Receipt", "category": "Receipts", "tags": ["coffee"]})
+        first_plan = plan(self.config, client=client)
+        self.assertEqual(first_plan.count("adopt"), 2, "nothing is filed yet, so both look adoptable")
+        organizer_apply(first_plan, self.config, client=client)
+
+        second_plan = plan(self.config, client=client)
+        self.assertEqual(second_plan.count("adopt"), 0)
+        self.assertEqual(second_plan.count("duplicate"), 1)
+        action = next(a for a in second_plan.actions if a.kind == "duplicate")
+        self.assertIn("same content as", action.reason)
+        self.assertTrue(action.path.is_file(), "a duplicate is reported, never deleted")
+
+    def test_applying_a_duplicate_action_changes_nothing(self):
+        client = StubClient({"title": "Coffee House Receipt", "category": "Receipts", "tags": ["coffee"]})
+        organizer_apply(plan(self.config, client=client), self.config, client=client)
+        report = plan(self.config, client=client)
+        before = sorted(p.name for p in self.root.rglob("*.pdf"))
+        organizer_apply(report, self.config, client=client)
+        self.assertEqual(sorted(p.name for p in self.root.rglob("*.pdf")), before)
+
+
+@unittest.skipUnless(HAS_RASTERISER, "needs pdftoppm")
+@unittest.skipUnless(HAS_BACKEND, "needs ocrmypdf or tesseract")
+class TestShortDocumentsStayOcrd(unittest.TestCase):
+    """A receipt's text layer is tiny; that must not read as "no text layer"."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "vault"
+        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        make_scanned_pdf(
+            self.root / "Receipts/scan.pdf",
+            ["THE COFFEE HOUSE", "RECEIPT 2017-03-05", "Total 12.40 GBP"],
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_short_receipt_is_not_re_ocrd_on_the_next_run(self):
+        client = StubClient(
+            {
+                "title": "Coffee House Receipt",
+                "category": "Receipts",
+                "document_date": "2017-03-05",
+                "tags": ["coffee"],
+            }
+        )
+        organizer_apply(plan(self.config, client=client), self.config, client=client)
+        attachment = next((self.root / "4 Archive/_attachments").rglob("*.pdf"))
+        text = pdf_text(attachment)
+        self.assertIn("COFFEE", text.upper())
+        self.assertLess(len(text), 180, "the fixture must be shorter than min_text_chars")
+
+        report = plan(self.config, client=client)
+        self.assertEqual(report.count("ocr"), 0, "a searchable receipt must not be re-OCR'd")
+        self.assertEqual(report.count("noop"), 1)

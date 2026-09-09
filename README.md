@@ -164,9 +164,10 @@ scanvault organize --vault ~/Obsidian/Archive
 ```
 [dry-run] ocr: 4 Archive/Invoices/2024/2024-05-02 Acme Invoice.md (attachment has no text layer)
 [dry-run] relocate: 4 Archive/Unsorted/old.md -> 4 Archive/Contracts/2022/2022-02-02 Old Note.md (layout drift)
-[dry-run] adopt: Inbox/scan.pdf (no note points at this PDF; no text layer, will OCR)
+[dry-run] adopt: WireLoad receipts/Scanbot Mar 5, 2017 11.57 AM.pdf (image-only PDF; will OCR, classify and file under "4 Archive")
+[dry-run] duplicate: WireLoad receipts/Scanbot Mar 5, 2017 11.57 AM - 1.pdf (same content as 4 Archive/Receipts/2017/2017-03-05 Coffee House.md)
 
-1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt (1 of them need OCR), 12 already filed, 3 left alone, 0 failed
+1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt (1 of them need OCR), 12 already filed, 1 duplicates, 3 left alone, 0 failed
 3 notes were left alone because scanvault did not write them; pass --include-unmanaged to file those too.
 Nothing was changed. Re-run with --apply to execute.
 ```
@@ -179,8 +180,15 @@ What each action means:
 | `relocate` | Moves the note and its PDF to where the templates say they belong. |
 | `rewrite` | Keeps the location, refreshes frontmatter from a new classification. |
 | `adopt` | A PDF in the vault that no note points at: OCR'd, classified and given a note. The plan says which of them have no text layer. |
+| `duplicate` | Byte-identical to a document already filed. Reported, never filed twice and never deleted. |
 | `already filed` | Nothing to do. |
 | `left alone` | A note scanvault did not write — see below. |
+
+Folders are provenance, not clutter: a PDF adopted from `WireLoad receipts/To
+expense/` keeps `source_folder: "WireLoad receipts/To expense"` in its
+frontmatter and picks up `wireload-receipts` and `to-expense` as tags, so the
+grouping your folders encoded survives the move into PARA. Set
+`tag_source_folder = false` to keep the frontmatter but skip the tags.
 
 A PDF only counts as loose when **no** note references it — `attachment:` in
 frontmatter, an `![[embed]]`, a `[[wikilink]]` or a markdown link all keep it out
@@ -257,7 +265,8 @@ language_hint = "English"          # language for generated titles/summaries
 [ocr]
 backend = "auto"                   # auto | ocrmypdf | tesseract | none
 languages = "eng+swe"
-min_text_chars = 180               # fewer characters than this ⇒ treat as image-only
+min_text_chars = 180               # a new scan with less text than this is OCR'd
+searchable_min_chars = 10          # a vault PDF with less text than this has no text layer
 force = false                      # re-OCR even when a text layer exists
 
 [llm]
@@ -273,6 +282,7 @@ note_path_template = "{para}/{category}/{year}/{date} {title}"
 attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {title}"
 source_action = "move"             # move | copy | leave
 include_text = true
+tag_source_folder = true           # turn the folder a document came from into tags
 
 [vault.para]
 projects_dir = "1 Projects"

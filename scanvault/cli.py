@@ -196,8 +196,8 @@ def cmd_organize(args: argparse.Namespace) -> int:
     summary = (
         f"\n{report.count('ocr')} to OCR, {report.count('relocate')} to relocate, "
         f"{report.count('rewrite')} to rewrite, {adopt}, "
-        f"{report.count('noop')} already filed, {report.count('skipped')} left alone, "
-        f"{report.count('failed')} failed"
+        f"{report.count('noop')} already filed, {report.count('duplicate')} duplicates, "
+        f"{report.count('skipped')} left alone, {report.count('failed')} failed"
     )
     print(summary if not args.apply else summary.replace("to ", ""))
     if report.count("skipped"):
