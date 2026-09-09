@@ -314,6 +314,18 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"model       : {config.llm.model} {'OK' if client.has_model() else 'NOT PULLED'}")
         if not client.has_model():
             print(f"              run: ollama pull {config.llm.model}")
+        else:
+            # A reachable model that answers with nothing usable is the failure
+            # that otherwise only shows up hundreds of documents into a run.
+            print("generation  : asking the model for one JSON object...", flush=True)
+            try:
+                reply = client.chat_json(
+                    "You reply with JSON and nothing else.",
+                    'Return exactly {"ok": true} and nothing else.',
+                )
+                print(f"              {'OK' if reply.get('ok') else f'unexpected reply: {reply}'}")
+            except LlmError as exc:
+                print(f"              FAILED: {exc}")
     except LlmError as exc:
         print(f"ollama      : {exc}")
 

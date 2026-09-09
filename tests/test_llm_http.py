@@ -33,11 +33,15 @@ class FakeOllama(BaseHTTPRequestHandler):
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
-        STATE["request"] = json.loads(self.rfile.read(length))
+        request = json.loads(self.rfile.read(length))
+        STATE["request"] = request
+        STATE.setdefault("requests", []).append(request)
         if STATE.get("fail"):
             self._send(500, {"error": "model runner crashed"})
             return
-        self._send(200, {"message": {"role": "assistant", "content": STATE["content"]}})
+        replies = STATE.get("replies")
+        message = replies.pop(0) if replies else {"content": STATE["content"]}
+        self._send(200, {"message": {"role": "assistant", **message}})
 
 
 class TestOllamaClient(unittest.TestCase):
@@ -83,6 +87,36 @@ class TestOllamaClient(unittest.TestCase):
         with self.assertRaises(LlmError) as caught:
             self.client().chat_json("s", "u")
         self.assertIn("500", str(caught.exception))
+
+    def test_an_empty_schema_response_is_retried_in_plain_json_mode(self):
+        STATE["replies"] = [{"content": ""}, {"content": '{"title": "Recovered"}'}]
+        result = self.client().chat_json("s", "u", schema={"type": "object"})
+        self.assertEqual(result["title"], "Recovered")
+        requests = STATE["requests"]
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0]["format"], {"type": "object"})
+        self.assertEqual(requests[1]["format"], "json", "the retry drops the schema")
+
+    def test_an_empty_response_twice_is_an_error_that_names_the_model(self):
+        STATE["replies"] = [{"content": ""}, {"content": "   "}]
+        with self.assertRaises(LlmError) as caught:
+            self.client().chat_json("s", "u", schema={"type": "object"})
+        self.assertIn("qwen3.5:9b", str(caught.exception))
+        self.assertIn("empty response", str(caught.exception))
+
+    def test_a_reasoning_models_thinking_field_is_used_when_content_is_empty(self):
+        STATE["replies"] = [{"content": "", "thinking": 'so: {"title": "From thinking"}'}]
+        result = self.client().chat_json("s", "u", schema={"type": "object"})
+        self.assertEqual(result["title"], "From thinking")
+        self.assertEqual(len(STATE["requests"]), 1, "no retry was needed")
+
+    def test_think_blocks_in_the_content_are_ignored(self):
+        STATE["content"] = '<think>Maybe {"title": "wrong"}?</think>\n{"title": "Right"}'
+        self.assertEqual(self.client().chat_json("s", "u")["title"], "Right")
+
+    def test_thinking_is_switched_off_in_the_request(self):
+        self.client().chat_json("s", "u")
+        self.assertIs(STATE["request"]["think"], False)
 
     def test_unreachable_host(self):
         client = OllamaClient(LlmConfig(host="http://127.0.0.1:1", timeout=2))
