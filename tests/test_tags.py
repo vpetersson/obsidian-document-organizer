@@ -123,3 +123,71 @@ class TestDerivedTags(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVocabularyCoverage(unittest.TestCase):
+    """The terminology someone's paperwork actually uses, in both languages."""
+
+    def setUp(self):
+        self.config = load_config()
+
+    def check(self, text: str, expected: str):
+        self.assertIn(expected, rule_tags(self.config, text), text)
+
+    def test_student_finance(self):
+        for text in (
+            "CSN betalningsplan for 2024",
+            "Centrala studiestödsnämnden - studiemedel",
+            "Student Loans Company annual statement",
+            "Your tuition fee loan balance",
+            "Federal student aid summary",
+        ):
+            self.check(text, "student-loan")
+
+    def test_pensions_and_investments(self):
+        self.check("NEST workplace pension annual statement", "pension")
+        self.check("Tjänstepension från Alecta", "pension")
+        self.check("Portfolio statement with dividend summary", "investments")
+        self.check("Ditt investeringssparkonto hos Nordnet", "investments")
+
+    def test_identity_and_legal(self):
+        self.check("Your new passport is enclosed", "identity")
+        self.check("Uppehållstillstånd beviljat", "identity")
+        self.check("Power of attorney signed before a solicitor", "legal")
+        self.check("Bouppteckning efter dödsboet", "legal")
+
+    def test_travel_subscriptions_and_warranty(self):
+        self.check("Boarding pass - booking reference AB12CD", "travel")
+        self.check("Annual membership renewal reminder", "subscription")
+        self.check("Two year warranty and proof of purchase", "warranty")
+
+    def test_home_medical_and_pets(self):
+        self.check("Gas safety certificate after the installation", "home-improvement")
+        self.check("Remiss till vårdcentralen", "medical")
+        self.check("Veterinary bill including microchip", "pets")
+
+    def test_loans_are_separate_from_mortgages(self):
+        self.check("Personal loan agreement", "loan")
+        self.check("Mortgage redemption statement", "mortgage")
+
+    def test_word_boundaries_stop_false_positives(self):
+        # "payee" is not PAYE, "risk" is not an ISK account, "taxi" is not tax.
+        for text in ("Payee details enclosed", "There is a risk here", "Taxi receipt for the airport"):
+            self.assertEqual(rule_tags(self.config, text), [], text)
+
+    def test_every_rule_group_has_keywords_and_a_slug_safe_name(self):
+        from scanvault.util import slugify
+
+        for tag, keywords in self.config.tags.rules.items():
+            self.assertTrue(keywords, tag)
+            self.assertEqual(tag, slugify(tag), tag)
+
+
+class TestCategories(unittest.TestCase):
+    def test_the_common_kinds_of_paperwork_have_a_home(self):
+        categories = load_config().categories
+        for expected in ("Pensions", "Investments", "Loans", "Identity", "Legal", "Travel"):
+            self.assertIn(expected, categories)
+
+    def test_other_is_still_the_last_resort(self):
+        self.assertEqual(load_config().categories[-1], "Other")
