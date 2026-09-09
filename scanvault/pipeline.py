@@ -63,7 +63,7 @@ def iter_pdfs(source: Path, recursive: bool = True) -> Iterator[Path]:
 
 
 def source_folder(path: Path, root: Path | None) -> str:
-    """The document's folder relative to `root`, e.g. "WireLoad receipts"."""
+    """The document's folder relative to `root`, e.g. "Work receipts"."""
     if root is None:
         return ""
     try:
@@ -202,6 +202,7 @@ def watch(
     interval: float = 20.0,
     settle_seconds: float = 2.0,
     iterations: int | None = None,
+    dry_run: bool = False,
 ) -> Report:
     """Poll the source folder forever (or `iterations` times) and ingest new scans."""
     if config.source_dir is None:
@@ -212,7 +213,7 @@ def watch(
         round_number += 1
         pending = [p for p in iter_pdfs(config.source_dir) if is_stable(p, settle_seconds)]
         if pending:
-            total.results.extend(ingest(config, pending, client).results)
+            total.results.extend(ingest(config, pending, client, dry_run=dry_run).results)
         if iterations is not None and round_number >= iterations:
             break
         time.sleep(interval)

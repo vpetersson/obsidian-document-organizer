@@ -17,7 +17,7 @@ from typing import Any
 
 from .classify import DocumentMeta, classify
 from .config import BUCKETS, Config
-from .extract import OcrError, available_backend, extract, pdf_text
+from .extract import OcrError, available_backend, extract, needs_password, pdf_text
 from .llm import OllamaClient
 from .pipeline import process_file
 from .state import State
@@ -158,7 +158,9 @@ def plan(
             continue
 
         if frontmatter.get("para_index"):
-            report.actions.append(Action("noop", note, note, "PARA index note"))
+            # Scaffolding, not a document - counting these as "already filed"
+            # made an empty vault look like it held four documents.
+            report.actions.append(Action("index", note, note, "PARA index note"))
             continue
         if not include_unmanaged and not is_managed(frontmatter):
             report.actions.append(Action("skipped", note, note, "not a scanvault note"))
@@ -167,8 +169,11 @@ def plan(
         should_classify = reclassify or needs_classification(frontmatter)
 
         if ocr and attachment_needs_ocr(vault, frontmatter, config):
+            attachment = attachment_path(vault, frontmatter)
             reason = "attachment has no text layer"
-            if backend == "none":
+            if attachment is not None and needs_password(attachment):
+                reason = "attachment is password-protected (qpdf --decrypt to fix)"
+            elif backend == "none":
                 reason += " (no OCR backend installed)"
             action = Action("ocr", note, None, reason, None, frontmatter, "")
             action.needs_ocr = True
@@ -199,7 +204,11 @@ def plan(
 
     if adopt:
         known_hashes = State(config.state_root).documents
-        for pdf in vault.iter_loose_pdfs():
+        for index, pdf in enumerate(vault.iter_loose_pdfs(), start=1):
+            if index % 50 == 0:
+                # A vault of several hundred PDFs takes a while to hash and
+                # probe; say something rather than looking hung.
+                log.info("scanned %d PDFs...", index)
             filed = known_hashes.get(sha256_file(pdf))
             if filed:
                 # Same bytes as a document already in the vault: a second copy
@@ -212,6 +221,13 @@ def plan(
                 vault.bucket_from_path(pdf) or config.vault.para.default_bucket
             )
             action = Action("adopt", pdf, None, "")
+            if needs_password(pdf):
+                action.reason = (
+                    "password-protected PDF; neither text extraction nor OCR can read "
+                    "it until the password is removed (qpdf --decrypt)"
+                )
+                report.actions.append(action)
+                continue
             if ocr and len(pdf_text(pdf)) < config.ocr.searchable_min_chars:
                 action.needs_ocr = True
                 action.reason = f'image-only PDF; will OCR, classify and file under "{destination}"'
@@ -298,7 +314,7 @@ def apply(
 
     for action in report.actions:
         try:
-            if action.kind in ("noop", "skipped", "duplicate", "failed"):
+            if action.kind in ("noop", "index", "skipped", "duplicate", "failed"):
                 continue
 
             if action.kind == "adopt":

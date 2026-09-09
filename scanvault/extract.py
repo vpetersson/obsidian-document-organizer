@@ -39,8 +39,38 @@ def _run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
     )
 
 
+def needs_password(path: Path, timeout: int = 60) -> bool:
+    """True when the PDF cannot be opened without a password.
+
+    Encryption alone is not the problem - plenty of PDFs are encrypted with an
+    empty user password and open fine. This is about the ones that do not.
+    """
+    try:
+        from pypdf import PdfReader  # type: ignore
+
+        reader = PdfReader(str(path))
+        if not reader.is_encrypted:
+            return False
+        try:
+            return not reader.decrypt("")
+        except Exception:
+            pass  # e.g. cryptography missing; ask poppler instead
+    except ImportError:
+        pass
+    except Exception:
+        return False  # broken some other way; the normal path reports that
+
+    if shutil.which("pdfinfo") is None:
+        return False
+    result = _run(["pdfinfo", str(path)], timeout)
+    return result.returncode != 0 and "password" in result.stderr.lower()
+
+
 def pdf_text(path: Path, timeout: int = 120) -> str:
     """Extract an existing text layer. Uses pypdf when installed, else pdftotext."""
+    if needs_password(path):
+        log.warning("%s is password-protected; no text can be extracted", path.name)
+        return ""
     try:
         from pypdf import PdfReader  # type: ignore
 
@@ -148,6 +178,11 @@ def _tesseract(src: Path, dst: Path, config: OcrConfig) -> str:
 
 def extract(path: Path, config: OcrConfig, work_dir: Path | None = None) -> ExtractResult:
     """Return the document's text, OCR'ing first if the PDF is image-only."""
+    if needs_password(path):
+        raise OcrError(
+            f"{path.name} is password-protected; remove the password first, "
+            f"e.g. `qpdf --decrypt --password=... \"{path.name}\" decrypted.pdf`"
+        )
     existing = "" if config.force else pdf_text(path)
     if not config.force and len(existing) >= config.min_text_chars:
         return ExtractResult(existing, False, "text-layer", path, page_count(path))

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scanvault"
-version = "0.2.0"
+version = "0.3.0"
 description = "OCR scanned PDFs and organize them into an Obsidian vault with ollama + Qwen"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,8 @@ dependencies = []
 [project.optional-dependencies]
 # pypdf gives faster, dependency-free text extraction; poppler's pdftotext is used otherwise.
 fast = [
-    "pypdf>=4.0",
+    "fonttools>=4.64.0",
+    "pypdf[crypto]>=4.0",
 ]
 
 [project.scripts]
