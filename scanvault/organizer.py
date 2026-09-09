@@ -158,7 +158,9 @@ def plan(
             continue
 
         if frontmatter.get("para_index"):
-            report.actions.append(Action("noop", note, note, "PARA index note"))
+            # Scaffolding, not a document - counting these as "already filed"
+            # made an empty vault look like it held four documents.
+            report.actions.append(Action("index", note, note, "PARA index note"))
             continue
         if not include_unmanaged and not is_managed(frontmatter):
             report.actions.append(Action("skipped", note, note, "not a scanvault note"))
@@ -312,7 +314,7 @@ def apply(
 
     for action in report.actions:
         try:
-            if action.kind in ("noop", "skipped", "duplicate", "failed"):
+            if action.kind in ("noop", "index", "skipped", "duplicate", "failed"):
                 continue
 
             if action.kind == "adopt":
