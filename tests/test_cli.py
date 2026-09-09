@@ -154,7 +154,7 @@ class TestPlanOutputStaysReadable(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.vault = Path(self.tmp.name) / "vault"
         run(["-q", "init-vault", "--vault", str(self.vault), "--apply"])
-        for name in ("Kaya", "Council Tax", "HM Revenue"):
+        for name in ("Holiday ideas", "Boiler service", "Bike maintenance"):
             note = self.vault / "Scanned/Private" / f"{name}.md"
             note.parent.mkdir(parents=True, exist_ok=True)
             note.write_text(f"# {name}\n\nnotes I wrote myself\n")
@@ -173,7 +173,7 @@ class TestPlanOutputStaysReadable(unittest.TestCase):
 
     def test_verbose_lists_them(self):
         out = self.organize("-v")
-        self.assertIn("Kaya.md (not a scanvault note)", out)
+        self.assertIn("Holiday ideas.md (not a scanvault note)", out)
 
     def test_para_index_notes_are_not_counted_as_filed_documents(self):
         out = self.organize()

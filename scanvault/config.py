@@ -116,7 +116,7 @@ class VaultConfig:
     # Extra tags added to every note.
     base_tags: list[str] = field(default_factory=lambda: ["scan"])
     # Turn the folder a document came from into tags, so an existing folder
-    # tree ("WireLoad receipts/To expense") survives the move into PARA.
+    # tree ("Work receipts/To expense") survives the move into PARA.
     tag_source_folder: bool = True
     max_tags: int = 8
     # Embed the OCR text in the note so Obsidian search can reach it.
