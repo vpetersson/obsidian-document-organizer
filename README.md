@@ -247,7 +247,7 @@ language: "English"
 confidence: 0.95
 para: "archive"
 classifier: "llm"
-scanvault_version: "0.20.0"
+scanvault_version: "0.21.0"
 processed: "2026-09-10T09:02:23Z"
 source_file: "scan_001.pdf"
 source_hash: "9f2c…"
@@ -772,6 +772,27 @@ Recognised: `.jpg`, `.jpeg`, `.png`, `.tif`, `.tiff`, `.bmp`, `.webp`, `.heic`,
 first with ImageMagick (or `heif-convert`, or `sips` on macOS), and `scanvault
 doctor` tells you whether you have one of those. An image carries no page size,
 so `image_dpi` under `[ocr]` says what resolution to assume — 300 by default.
+
+### Transparency
+
+ocrmypdf refuses an image with an alpha channel outright — *"The input image has
+an alpha channel. Remove the alpha channel first"* — which is every screenshot,
+because that is what macOS and most phones write. scanvault removes it first:
+the alpha is composited onto white (a document is paper, and dark text on
+nothing would come out unreadable on anything else) before OCR ever sees the
+file. The original on disk is not touched.
+
+That is done in `scanvault/png.py` with the standard library, so a screenshot
+does not need ImageMagick installed to be readable. A PNG whose alpha channel is
+fully opaque — the common case — has the channel dropped rather than composited,
+which is the difference between a fraction of a second and a couple on a
+four-megapixel image. Anything outside what that handles (interlaced PNGs, a
+TIFF with an alpha channel) falls back to ImageMagick if you have it, and
+failing that to tesseract, which reads transparency without complaint.
+
+Palette images with a `tRNS` chunk are left alone: they are also transparent,
+but ocrmypdf reads them without complaint, so rewriting one would be a
+conversion spent fixing something that is not broken.
 
 ## Naming a document
 
