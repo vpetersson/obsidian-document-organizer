@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from .cache import ClassificationCache
-from .parallel import Progress, parallel_map, resolve_workers
+from .parallel import Progress, pipeline as run_pipeline, resolve_workers
 from .classify import DocumentMeta, classify, resolve_date
 from .config import Config
 from .extract import DOCUMENT_SUFFIXES, ExtractResult, OcrError, extract, is_image
@@ -286,10 +286,13 @@ def ingest(
             path, "", ProcessResult(path, "failed", error=f"{type(exc).__name__}: {exc}")
         )
 
-    for prepared in parallel_map(prepare, paths, workers, on_error=failed):
-        # Writing stays on this thread: unique filenames, the dedupe index and
-        # the cache file are all shared state.
-        report.results.append(file_document(prepared, config, vault, state, dry_run))
+    def file(path: Path, prepared: Prepared) -> ProcessResult:
+        # Writing stays on the calling thread - unique filenames, the dedupe
+        # index and the cache file are all shared - but it happens as soon as
+        # that document is ready, not after every document has been read.
+        return file_document(prepared, config, vault, state, dry_run)
+
+    report.results.extend(run_pipeline(paths, prepare, file, workers, on_error=failed))
     if state is not None and not dry_run:
         state.save()
     if own_cache and cache is not None:

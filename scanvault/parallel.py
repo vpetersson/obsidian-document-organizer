@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable, Sequence, TypeVar
 
 log = logging.getLogger(__name__)
 
 T = TypeVar("T")
+P = TypeVar("P")
 R = TypeVar("R")
 
 # More than this and a single ollama instance is queueing rather than working.
@@ -55,6 +56,44 @@ def parallel_map(
     # cache and the config without pickling anything.
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scanvault") as pool:
         return list(pool.map(lambda item: _run_one(work, item, on_error), items))
+
+
+def pipeline(
+    items: Sequence[T],
+    prepare: Callable[[T], P],
+    finish: Callable[[T, P], R],
+    workers: int = 1,
+    on_error: Callable[[T, Exception], P] | None = None,
+) -> list[R]:
+    """Take each item all the way through, without waiting for the others.
+
+    `prepare` is the slow half and runs on the workers; `finish` is the half
+    that touches shared state and runs on the calling thread, as soon as that
+    item's `prepare` lands rather than after every item has finished. So a
+    document is written the moment it is ready, memory holds only what is in
+    flight, and a run that dies half way has half its work on disk.
+
+    Results come back in input order even though the work does not, because a
+    summary that changes order between runs is hard to read.
+    """
+    items = list(items)
+    if not items:
+        return []
+
+    workers = resolve_workers(workers)
+    if workers == 1:
+        return [finish(item, _run_one(prepare, item, on_error)) for item in items]
+
+    results: list[R | None] = [None] * len(items)
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="scanvault") as pool:
+        futures = {
+            pool.submit(_run_one, prepare, item, on_error): index
+            for index, item in enumerate(items)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            results[index] = finish(items[index], future.result())
+    return [result for result in results if result is not None]
 
 
 def _run_one(

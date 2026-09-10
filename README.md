@@ -374,9 +374,16 @@ own labelled JSON — same shape, `id`, `language`, `context`, `category`, `tags
 ## Speed
 
 Classification dominates a big run: OCR is seconds, the model is seconds *per
-document*, and a vault has hundreds. Documents are read and classified on
-several workers at once, and everything that touches the vault stays on one
-thread, so filenames, the dedupe index and the cache are never raced.
+document*, and a vault has hundreds. Each document goes through the whole
+pipeline on its own — read, OCR, classify, written — without waiting for the
+others, so the first note appears seconds after you start rather than after the
+last document has been classified, and a run that dies half way has half its
+work on disk.
+
+The write step stays on one thread. Unique filenames, the dedupe index and the
+cache file are shared state, and writing a note is milliseconds against seconds
+of model time, so serialising it costs nothing measurable and removes a whole
+category of race.
 
 ```bash
 scanvault organize --vault ~/Obsidian/Archive --workers 8 --apply

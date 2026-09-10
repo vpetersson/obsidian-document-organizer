@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .cache import ClassificationCache
-from .parallel import Progress, parallel_map, resolve_workers
+from .parallel import Progress, parallel_map, pipeline as run_pipeline, resolve_workers
 from .classify import DocumentMeta, classify, resolve_date
 from .config import BUCKETS, Config
 from .extract import OcrError, available_backend, extract, is_image, needs_password, pdf_text
@@ -391,6 +391,8 @@ def _run_ocr(
     client: OllamaClient | None,
     cache: ClassificationCache | None = None,
 ) -> None:
+    """OCR one attachment and re-read it. Only touches that document's files,
+    so it is safe on a worker; the note is moved and rewritten later."""
     """OCR the note's attachment in place, then refresh its metadata and text."""
     pdf = attachment_path(vault, action.frontmatter)
     if pdf is None:
@@ -445,20 +447,26 @@ def apply(
     own_cache = cache is None
     if own_cache:
         cache = ClassificationCache(config.state_root, config, enabled=use_cache)
-    adopts = [action for action in report.actions if action.kind == "adopt"]
     workers = resolve_workers(config.llm.workers) if client is not None else 1
-    prepared_adopts: dict[Path, Prepared] = {}
-    if adopts:
-        log.info(
-            "reading %d unfiled documents on %d worker%s",
-            len(adopts),
-            workers,
-            "" if workers == 1 else "s",
-        )
-        adopt_progress = Progress(len(adopts))
 
-        def read_document(action: Action) -> Prepared:
-            adopt_progress.start(action.path.name)
+    todo = [
+        action
+        for action in report.actions
+        if action.kind not in ("noop", "index", "skipped", "duplicate", "failed")
+    ]
+    log.info("applying %d changes", len(todo))
+    progress = Progress(len(todo))
+
+    # Adopting a document and OCR'ing one both mean OCR plus a model call;
+    # relocating and rewriting are file moves. Only the first kind is worth
+    # sending to the workers, and each of those goes all the way through -
+    # read, classify, written - without waiting for the rest.
+    slow = [action for action in todo if action.kind in ("adopt", "ocr")]
+    fast = [action for action in todo if action not in slow]
+
+    def read(action: Action) -> Prepared | None:
+        progress.start(f"{action.kind} {action.path.name}")
+        if action.kind == "adopt":
             return prepare_document(
                 action.path,
                 config,
@@ -468,91 +476,81 @@ def apply(
                 source_root=vault.root,
                 cache=cache,
             )
+        _run_ocr(vault, action, config, client, cache)
+        return None
 
-        def unreadable(action: Action, exc: Exception) -> Prepared:
-            return _nothing_to_file(
-                action.path,
-                "",
-                ProcessResult(action.path, "failed", error=f"{type(exc).__name__}: {exc}"),
-            )
+    def unreadable(action: Action, exc: Exception) -> Prepared | None:
+        log.exception("failed to read %s", action.path)
+        action.kind, action.error = "failed", f"{type(exc).__name__}: {exc}"
+        return None
 
-        prepared_adopts = dict(
-            zip(
-                (action.path for action in adopts),
-                parallel_map(read_document, adopts, workers, on_error=unreadable),
-            )
-        )
+    def write(action: Action, prepared: Prepared | None) -> Action:
+        _write_action(action, prepared, vault, config, state, cache)
+        return action
 
-    todo = [
-        action
-        for action in report.actions
-        if action.kind not in ("noop", "index", "skipped", "duplicate", "failed")
-    ]
-    log.info("applying %d changes", len(todo))
-    done = 0
-
-    for action in report.actions:
-        try:
-            if action.kind in ("noop", "index", "skipped", "duplicate", "failed"):
-                continue
-            done += 1
-            log.info("[%d/%d] %s %s", done, len(todo), action.kind, action.path.name)
-
-            if action.kind == "adopt":
-                prepared = prepared_adopts.get(action.path)
-                if prepared is None:  # a plan built elsewhere, or --no-adopt
-                    prepared = prepare_document(
-                        action.path,
-                        config,
-                        client,
-                        state,
-                        bucket=vault.bucket_from_path(action.path),
-                        source_root=vault.root,
-                        cache=cache,
-                    )
-                result = file_document(prepared, config, vault, state)
-                if result.status == "failed":
-                    action.kind, action.error = "failed", result.error
-                else:
-                    action.target, action.meta = result.note, result.meta
-                continue
-
-            if action.kind == "ocr":
-                _run_ocr(vault, action, config, client, cache)
-                target = vault.note_path(action.meta)
-                action.target = None if target.resolve() == action.path.resolve() else target
-
-            attachment = _move_attachment(vault, action.frontmatter, action.meta)
-            destination = action.path
-            if action.target is not None and action.target.resolve() != action.path.resolve():
-                destination = unique_path(action.target)
-                action.target = destination
-            _rewrite_note(vault, action, attachment, destination)
-            if destination.resolve() != action.path.resolve():
-                action.path.unlink(missing_ok=True)
-                _prune_empty_dirs(action.path.parent, vault.root)
-            if state is not None:
-                digest = action.frontmatter.get("source_hash")
-                if isinstance(digest, str) and state.get(digest):
-                    state.record(
-                        digest,
-                        note=destination.relative_to(vault.root).as_posix(),
-                        attachment=(
-                            attachment.relative_to(vault.root).as_posix() if attachment else None
-                        ),
-                        source=action.frontmatter.get("source_file"),
-                        title=action.meta.title if action.meta else "",
-                        category=action.meta.category if action.meta else "",
-                    )
-        except Exception as exc:  # keep organising the rest of the vault
-            log.exception("failed to organise %s", action.path)
-            action.kind, action.error = "failed", f"{type(exc).__name__}: {exc}"
+    for action in fast:
+        progress.start(f"{action.kind} {action.path.name}")
+        write(action, None)
+    run_pipeline(slow, read, write, workers, on_error=unreadable)
 
     if state is not None:
         state.save()
     if own_cache and cache is not None:
         cache.save()
     return report
+
+
+def _write_action(
+    action: Action,
+    prepared: Prepared | None,
+    vault: Vault,
+    config: Config,
+    state: State | None,
+    cache: ClassificationCache | None,
+) -> None:
+    """The half that touches the vault. One thread at a time, by construction."""
+    try:
+        if action.kind == "failed":
+            return
+        if action.kind == "adopt":
+            if prepared is None:
+                return
+            result = file_document(prepared, config, vault, state)
+            if result.status == "failed":
+                action.kind, action.error = "failed", result.error
+            else:
+                action.target, action.meta = result.note, result.meta
+            return
+
+        if action.kind == "ocr":
+            target = vault.note_path(action.meta)
+            action.target = None if target.resolve() == action.path.resolve() else target
+
+        attachment = _move_attachment(vault, action.frontmatter, action.meta)
+        destination = action.path
+        if action.target is not None and action.target.resolve() != action.path.resolve():
+            destination = unique_path(action.target)
+            action.target = destination
+        _rewrite_note(vault, action, attachment, destination)
+        if destination.resolve() != action.path.resolve():
+            action.path.unlink(missing_ok=True)
+            _prune_empty_dirs(action.path.parent, vault.root)
+        if state is not None:
+            digest = action.frontmatter.get("source_hash")
+            if isinstance(digest, str) and state.get(digest):
+                state.record(
+                    digest,
+                    note=destination.relative_to(vault.root).as_posix(),
+                    attachment=(
+                        attachment.relative_to(vault.root).as_posix() if attachment else None
+                    ),
+                    source=action.frontmatter.get("source_file"),
+                    title=action.meta.title if action.meta else "",
+                    category=action.meta.category if action.meta else "",
+                )
+    except Exception as exc:  # keep organising the rest of the vault
+        log.exception("failed to organise %s", action.path)
+        action.kind, action.error = "failed", f"{type(exc).__name__}: {exc}"
 
 
 def _prune_empty_dirs(directory: Path, stop_at: Path) -> None:
