@@ -16,6 +16,7 @@ from .config import GENERIC_CATEGORIES, WEAK_TAGS, Config
 from .dates import date_from_text, find_dates, strong_date
 from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
+from .tags import TagLedger
 from .util import (
     clean_document_name,
     clean_title,
@@ -291,16 +292,28 @@ def rule_tags(config: Config, *haystacks: str) -> list[str]:
     return found
 
 
-def _clean_tags(raw: Any, config: Config, meta_extra: list[str]) -> list[str]:
-    """Assemble the tag list, keeping the deterministic ones first."""
+def _clean_tags(
+    raw: Any, config: Config, meta_extra: list[str], ledger: TagLedger | None = None
+) -> list[str]:
+    """Assemble the tag list, keeping the deterministic ones first.
+
+    With a ledger, each tag is matched against the vocabulary the vault already
+    uses before a new one is minted - otherwise every document invents its own
+    spelling and searching for one of them finds four fifths of the documents.
+    """
     tags: list[str] = []
     for value in list(config.tags.base) + meta_extra + (raw if isinstance(raw, list) else []):
         if not isinstance(value, str):
             continue
         tag = slugify(value.lstrip("#"), max_length=40)
+        if ledger is not None and tag:
+            tag = ledger.canonical(tag)
         if tag and tag not in tags:
             tags.append(tag)
-    return tags[: max(len(config.tags.base) + len(meta_extra), config.tags.max_tags)]
+    kept = tags[: max(len(config.tags.base) + len(meta_extra), config.tags.max_tags)]
+    if ledger is not None:
+        ledger.record(kept)
+    return kept
 
 
 def _haystacks(meta: DocumentMeta, text: str) -> tuple[str, ...]:
@@ -412,7 +425,11 @@ def _match_category(value: Any, config: Config) -> str:
 
 
 def from_response(
-    data: dict[str, Any], config: Config, fallback_title: str, text: str = ""
+    data: dict[str, Any],
+    config: Config,
+    fallback_title: str,
+    text: str = "",
+    ledger: TagLedger | None = None,
 ) -> DocumentMeta:
     """Normalise a raw model response into a DocumentMeta we can trust."""
     model_title = str(data.get("title") or "").strip()
@@ -442,7 +459,9 @@ def from_response(
         confidence=float(confidence) if isinstance(confidence, (int, float)) else None,
     )
     meta.category = category_from_rules(meta, config, text)
-    meta.tags = _clean_tags(data.get("tags"), config, derived_tags(meta, config, text))
+    meta.tags = _clean_tags(
+        data.get("tags"), config, derived_tags(meta, config, text), ledger
+    )
     return meta
 
 
@@ -538,7 +557,9 @@ HEURISTIC_RULES: list[tuple[str, tuple[str, ...]]] = [
 ]
 
 
-def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
+def heuristic(
+    text: str, config: Config, fallback_title: str, ledger: TagLedger | None = None
+) -> DocumentMeta:
     """Offline classifier used when ollama is unavailable."""
     lowered = text.lower()
     category = config.categories[-1] if config.categories else "Other"
@@ -571,7 +592,9 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         title_source=title_source,
     )
     meta.category = category_from_rules(meta, config, text)
-    meta.tags = _clean_tags(["unclassified"], config, derived_tags(meta, config, text))
+    meta.tags = _clean_tags(
+        ["unclassified"], config, derived_tags(meta, config, text), ledger
+    )
     return meta
 
 
@@ -581,21 +604,22 @@ def classify(
     client: OllamaClient | None,
     source: Path | None = None,
     cache: ClassificationCache | None = None,
+    ledger: TagLedger | None = None,
 ) -> DocumentMeta:
     """Classify one document, degrading to heuristics when configured to."""
     # A scanner's filename is noise, not a title: strip what it stamps on and
     # only keep what is left if there is something to keep.
     fallback_title = (clean_document_name(source.stem) if source else "") or "Untitled document"
     if not text.strip():
-        meta = heuristic("", config, fallback_title)
-        meta.tags = _clean_tags(["empty-text"], config, [])
+        meta = heuristic("", config, fallback_title, ledger)
+        meta.tags = _clean_tags(["empty-text"], config, [], ledger)
         return meta
     if client is None:
-        return heuristic(text, config, fallback_title)
+        return heuristic(text, config, fallback_title, ledger)
 
     cached = cache.get(text) if cache is not None else None
     if cached is not None:
-        return from_response(cached, config, fallback_title, text)
+        return from_response(cached, config, fallback_title, text, ledger)
 
     try:
         data = client.chat_json(
@@ -612,7 +636,7 @@ def classify(
         if not config.llm.fallback_to_heuristics:
             raise
         log.warning("classification fell back to heuristics: %s", exc)
-        return heuristic(text, config, fallback_title)
+        return heuristic(text, config, fallback_title, ledger)
     if cache is not None:
         cache.put(text, data)
-    return from_response(data, config, fallback_title, text)
+    return from_response(data, config, fallback_title, text, ledger)

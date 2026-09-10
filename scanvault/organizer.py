@@ -29,6 +29,7 @@ from .pipeline import (
     prepare_document,
 )
 from .state import State
+from .tags import TagLedger, ledger_for, report_folded
 from .util import sha256_file, unique_path
 from .vault import Vault
 
@@ -102,6 +103,9 @@ class Action:
 @dataclass
 class OrganizeReport:
     actions: list[Action] = field(default_factory=list)
+    # The vocabulary the plan was made against, so `apply` folds tags the same
+    # way the preview said it would.
+    ledger: TagLedger | None = None
 
     def count(self, kind: str) -> int:
         return sum(1 for action in self.actions if action.kind == kind)
@@ -208,6 +212,27 @@ def documents_need_ocr(
     return False
 
 
+def tags_off_ledger(frontmatter: dict[str, Any], ledger: TagLedger) -> list[str]:
+    """Tags on this note that the ledger would spell differently.
+
+    Without this the ledger only ever applies to documents filed from now on,
+    and the vault someone already has stays as inconsistent as it was.
+    """
+    tags = frontmatter.get("tags")
+    if isinstance(tags, str):
+        tags = [tags]
+    if not isinstance(tags, list):
+        return []
+    drifted = []
+    for tag in tags:
+        if not isinstance(tag, str):
+            continue
+        canonical = ledger.canonical(tag)
+        if canonical and canonical != tag:
+            drifted.append(f"{tag} -> {canonical}")
+    return drifted
+
+
 def merged_cssclasses(frontmatter: dict[str, Any], config: Config) -> list[str]:
     """The note's own classes, plus the configured ones it is missing."""
     present = frontmatter.get("cssclasses")
@@ -271,10 +296,16 @@ def plan(
     ocr: bool = True,
     cache: ClassificationCache | None = None,
     use_cache: bool = True,
+    ledger: TagLedger | None = None,
 ) -> OrganizeReport:
     """Work out what the vault needs, without touching anything."""
     vault = Vault(config)
     report = OrganizeReport()
+    if ledger is None:
+        # The vault's own vocabulary, including tags from notes we did not
+        # write - fighting someone's tags with near-copies is the problem.
+        ledger = ledger_for(config, vault)
+    report.ledger = ledger
     own_cache = cache is None
     if own_cache:
         # --reclassify means ask again, so the cache stops answering for this run.
@@ -350,7 +381,7 @@ def plan(
         note, frontmatter, body, _ = entry
         progress.start(note.name)
         text = note_text(vault, note, frontmatter, body, config)
-        meta = classify(text, config, client, source=note, cache=cache)
+        meta = classify(text, config, client, source=note, cache=cache, ledger=ledger)
         resolve_date(meta, attachment_path(vault, frontmatter) or note, config, text)
         return text, meta
 
@@ -388,6 +419,20 @@ def plan(
                         note,
                         note,
                         f"extracted text is {style}, not {config.vault.extracted_text_style}",
+                        meta,
+                        frontmatter,
+                        embedded_text(body),
+                    )
+                )
+                continue
+            off_ledger = tags_off_ledger(frontmatter, ledger)
+            if off_ledger:
+                report.actions.append(
+                    Action(
+                        "rewrite",
+                        note,
+                        note,
+                        f"tags not in the ledger: {', '.join(off_ledger)}",
                         meta,
                         frontmatter,
                         embedded_text(body),
@@ -475,6 +520,7 @@ def plan(
         cache.save()
     if cache is not None and (cache.hits or cache.misses):
         log.info("classifications: %s", cache.summary())
+    report_folded(ledger)
     return report
 
 
@@ -501,6 +547,7 @@ def _run_ocr(
     config: Config,
     client: OllamaClient | None,
     cache: ClassificationCache | None = None,
+    ledger: TagLedger | None = None,
 ) -> None:
     """Read everything the note points at, and refresh its metadata from it.
 
@@ -532,7 +579,9 @@ def _run_ocr(
     text = "\n\n".join(texts)
 
     if action.classify_after:
-        action.meta = classify(text, config, client, source=action.path, cache=cache)
+        action.meta = classify(
+            text, config, client, source=action.path, cache=cache, ledger=ledger
+        )
         resolve_date(action.meta, documents[0], config, text)
     else:
         action.meta = vault.meta_from_note(action.frontmatter, action.path.stem)
@@ -544,7 +593,11 @@ def _run_ocr(
 
 
 def _rewrite_note(
-    vault: Vault, action: Action, attachment: Path | None, destination: Path
+    vault: Vault,
+    action: Action,
+    attachment: Path | None,
+    destination: Path,
+    ledger: TagLedger | None = None,
 ) -> None:
     meta = action.meta
     assert meta is not None
@@ -554,6 +607,8 @@ def _rewrite_note(
         if key in action.frontmatter
     }
     preserved["cssclasses"] = merged_cssclasses(action.frontmatter, vault.config)
+    if ledger is not None:
+        meta.tags = ledger.apply(meta.tags)
     _, body = vault.read_note(action.path)
     text = action.body_text
     if not text and vault.config.vault.include_text:
@@ -582,9 +637,13 @@ def apply(
     use_state: bool = True,
     cache: ClassificationCache | None = None,
     use_cache: bool = True,
+    ledger: TagLedger | None = None,
 ) -> OrganizeReport:
     """Execute a plan. Returns the same report with kinds updated to what happened."""
     vault = Vault(config)
+    # The plan already built one and folded tags with it; reusing it keeps the
+    # answers stable between the preview and the run.
+    ledger = ledger or report.ledger or ledger_for(config, vault)
     state = State(config.state_root) if use_state else None
     own_cache = cache is None
     if own_cache:
@@ -617,10 +676,11 @@ def apply(
                 bucket=vault.bucket_from_path(action.path),
                 source_root=vault.root,
                 cache=cache,
+                ledger=ledger,
             )
             progress.finish(action.path.name, started)
             return prepared
-        _run_ocr(vault, action, config, client, cache)
+        _run_ocr(vault, action, config, client, cache, ledger)
         progress.finish(action.path.name, started)
         return None
 
@@ -630,7 +690,7 @@ def apply(
         return None
 
     def write(action: Action, prepared: Prepared | None) -> Action:
-        _write_action(action, prepared, vault, config, state, cache)
+        _write_action(action, prepared, vault, config, state, cache, ledger)
         return action
 
     for action in fast:
@@ -644,6 +704,8 @@ def apply(
         state.save()
     if own_cache and cache is not None:
         cache.save()
+    report_folded(ledger)
+    ledger.save(config.state_root)
     return report
 
 
@@ -654,6 +716,7 @@ def _write_action(
     config: Config,
     state: State | None,
     cache: ClassificationCache | None,
+    ledger: TagLedger | None = None,
 ) -> None:
     """The half that touches the vault. One thread at a time, by construction."""
     try:
@@ -678,7 +741,7 @@ def _write_action(
         if action.target is not None and action.target.resolve() != action.path.resolve():
             destination = unique_path(action.target)
             action.target = destination
-        _rewrite_note(vault, action, attachment, destination)
+        _rewrite_note(vault, action, attachment, destination, ledger)
         if destination.resolve() != action.path.resolve():
             action.path.unlink(missing_ok=True)
             _prune_empty_dirs(action.path.parent, vault.root)

@@ -66,6 +66,7 @@ itself, which is standard-library Python.
 | `<vault>/…` | Your notes and PDFs, as plain Markdown and PDF files |
 | `<vault>/.scanvault/index.json` | SHA-256 of each filed document, so re-runs skip it |
 | `<vault>/.scanvault/classifications.json` | The model's answers, cached so a preview is not paid for twice |
+| `<vault>/.scanvault/tags.json` | The tags in use, so a new document reuses them instead of inventing near-copies |
 | `<vault>/.scanvault/work/` | Temporary OCR output |
 
 Nothing is written outside the vault, and deleting `.scanvault/` costs you only
@@ -175,6 +176,7 @@ scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
 | `init-vault` | create the folder documents are filed into, and the CSS snippet |
 | `init-config` | write a starting `scanvault.toml` |
 | `doctor` | check the OCR toolchain, the model, and whether requests really run in parallel |
+| `tags` | the vault's tag vocabulary, and the near-duplicates in it |
 | `eval` | score the classifier against a labelled corpus |
 
 Every command that writes takes `--apply` and `--dry-run`; `-v`/`--verbose` and
@@ -198,6 +200,7 @@ Every command that writes takes `--apply` and `--dry-run`; `-v`/`--verbose` and
 | `--include-unmanaged` | organize | also file notes scanvault did not write |
 | `--out`, `--text-out` | ocr | where to put searchable PDFs and extracted text |
 | `--interval`, `--iterations` | watch | how often to poll, and how many times |
+| `--duplicates`, `--min-count` | tags | only tags spelled more than one way, and how rare to show |
 | `--corpus` | eval | a labelled corpus of your own |
 | `--output`, `--force` | init-config | where to write, and overwrite if it exists |
 
@@ -215,6 +218,7 @@ your-vault/
 └── .scanvault/
     ├── index.json              <- SHA-256 of everything filed, so re-runs skip it
     ├── classifications.json    <- the model's answers, so a preview is not paid for twice
+    ├── tags.json               <- the tag vocabulary, so it stays one vocabulary
     └── work/                   <- temporary OCR output
 ```
 
@@ -243,7 +247,7 @@ language: "English"
 confidence: 0.95
 para: "archive"
 classifier: "llm"
-scanvault_version: "0.19.0"
+scanvault_version: "0.20.0"
 processed: "2026-09-10T09:02:23Z"
 source_file: "scan_001.pdf"
 source_hash: "9f2c…"
@@ -351,7 +355,7 @@ What each action means:
 | --- | --- |
 | `ocr` | Nothing the note points at can be read. Runs OCR, **replaces a PDF attachment with the searchable version**, refreshes the note's extracted text and records the backend in `ocr:`. If the note's metadata was thin, it is classified from the fresh text and refiled. |
 | `relocate` | Moves the note and its PDF to where the templates say they belong. |
-| `rewrite` | Keeps the location, refreshes frontmatter from a new classification, or adds a `cssclasses` value the note predates. Anything you wrote in the note — prose, embeds — is carried across. |
+| `rewrite` | Keeps the location, refreshes frontmatter from a new classification, folds a tag onto the vault's spelling of it, or adds a `cssclasses` value the note predates. Anything you wrote in the note — prose, embeds — is carried across. |
 | `adopt` | A PDF in the vault that no note points at: OCR'd, classified and given a note. The plan says which of them have no text layer. |
 | `duplicate` | Byte-identical to a document already filed. Reported, never filed twice and never deleted. |
 | `already filed` | Nothing to do. |
@@ -654,12 +658,72 @@ which means searching `mortgage` finds every mortgage document, searching
 `12-example-street` finds everything about that property, and `taxes year-2023`
 finds a year's tax paperwork regardless of who sent it.
 
+### The tag ledger
+
+That only works if there is *one* spelling of each tag. Left to itself, a
+classifier tags every document from scratch and the vocabulary drifts —
+`mortgage` on forty documents and `mortgages` on one, `council-tax` and
+`counciltax`, `skatteverket` and `skatteverkets`. Each is a reasonable answer on
+its own, and the set of them is useless: searching `mortgage` finds four fifths
+of your mortgage paperwork.
+
+So scanvault keeps a ledger of the tags the vault actually uses, and matches
+against it before minting a new one. Seeded from your notes at the start of
+every run — including notes scanvault did not write, because fighting your own
+tags with near-copies of them is the problem rather than the solution — and
+cached in `<vault>/.scanvault/tags.json`.
+
+Matching is two steps, cheap first:
+
+* a **fingerprint** — diacritics folded, words singularised and sorted — so
+  `invoices` and `invoice`, `Council Tax` and `council-tax`, `tax-council` and
+  `council-tax` are the same tag before any similarity is computed;
+* failing that, **string similarity** against the tags already in use, which
+  catches the rest: `counciltax` → `council-tax`, `skatteverkets` →
+  `skatteverket`.
+
+The spelling that wins is the one most documents already use, so the ledger
+follows your vault rather than the other way round — except for the tags in
+`[tags] rules` and your category list, which keep their spelling however rare
+they are. That vocabulary is the fixed part.
+
+**What is never merged** matters more than what is:
+
+* two tags whose digits differ, so `year-2023` and `year-2024` — 89% similar and
+  completely unrelated — stay apart, as do `invoice-2024-0188` and its siblings;
+* anything below `merge_cutoff` (0.88), which keeps `mortgage` apart from
+  `mortgage-statement`, `medical` from `medicine`, `hsbc` from `hsbc-bank-plc`
+  and `banking` from `bank`. Set it to `1.0` to turn similarity matching off
+  and keep only the fingerprint.
+
+`scanvault tags` prints the vocabulary, and `--duplicates` prints just the mess:
+
+```console
+$ scanvault tags --vault ~/Obsidian/Archive
+   40  mortgage       <- mortgages
+   11  council-tax    <- counciltax, council-taxes
+    9  year-2024
+    ...
+
+$ scanvault tags --vault ~/Obsidian/Archive --duplicates
+2 tag(s) spelled more than one way:
+  mortgage                       <- mortgages
+  council-tax                    <- counciltax, council-taxes
+
+organize --apply rewrites the notes that use the other spellings.
+```
+
+An existing vault is consolidated by `organize`, which reports each note whose
+tags are off the ledger as `rewrite: … (tags not in the ledger: mortgages ->
+mortgage)` and leaves the rest alone.
+
 ```toml
 [tags]
 year_tag = true
 correspondent_tag = true
 subject_tags = true
 max_tags = 12
+merge_cutoff = 0.88                # how alike two tags must be to be one tag
 review_below = 0.5   # below this confidence the note is tagged needs-review
 # `extra_rules` adds to the built-in table; `rules` replaces it outright.
 extra_rules = { boat = ["mooring", "marina", "hamnavgift"] }

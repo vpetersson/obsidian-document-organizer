@@ -322,6 +322,11 @@ class TagConfig:
     # Tag what the document is about - a property, a vehicle, an account.
     subject_tags: bool = True
     max_tags: int = 12
+    # How alike two tags have to be before the second is folded into the first.
+    # 1.0 turns fuzzy matching off and leaves only exact and fingerprint
+    # matching ("invoices" -> "invoice"); below about 0.85 it starts merging
+    # tags that are merely related.
+    merge_cutoff: float = 0.88
     # Below this confidence the note is tagged `needs-review`.
     review_below: float = 0.5
     # Let a keyword rule pick the category when the model reached for a generic
