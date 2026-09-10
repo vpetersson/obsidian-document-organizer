@@ -142,3 +142,86 @@ def make_scan_image(path: Path, lines: list[str], dpi: int = 150, fmt: str = "jp
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(rendered.read_bytes())
     return path
+
+
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    import struct
+    import zlib
+
+    return (
+        struct.pack(">I", len(payload))
+        + kind
+        + payload
+        + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+    )
+
+
+def _apply_filter(line: bytes, previous: bytes, step: int, filter_type: int) -> bytes:
+    """Encode one scanline, the inverse of what the decoder undoes."""
+    from scanvault.png import _paeth
+
+    out = bytearray(len(line))
+    for i, value in enumerate(line):
+        left = line[i - step] if i >= step else 0
+        up = previous[i]
+        upper_left = previous[i - step] if i >= step else 0
+        if filter_type == 0:
+            out[i] = value
+        elif filter_type == 1:
+            out[i] = (value - left) & 0xFF
+        elif filter_type == 2:
+            out[i] = (value - up) & 0xFF
+        elif filter_type == 3:
+            out[i] = (value - ((left + up) >> 1)) & 0xFF
+        else:
+            out[i] = (value - _paeth(left, up, upper_left)) & 0xFF
+    return bytes(out)
+
+
+def make_png(
+    path: Path,
+    rows: list[list[tuple[int, ...]]],
+    colour_type: int = 6,
+    depth: int = 8,
+    filter_type: int = 0,
+    interlace: int = 0,
+    extra_chunks: list[tuple[bytes, bytes]] | None = None,
+) -> Path:
+    """Write a PNG by hand, so a fixture needs no image library.
+
+    `rows` is a grid of per-pixel tuples in whatever the colour type means:
+    (grey, alpha) for type 4, (r, g, b, alpha) for type 6.
+    """
+    import struct
+    import zlib
+
+    height = len(rows)
+    width = len(rows[0]) if height else 0
+    sample = depth // 8
+    raw = bytearray()
+    previous = bytes()
+    for row in rows:
+        line = bytearray()
+        for pixel in row:
+            for value in pixel:
+                if sample == 1:
+                    line.append(value & 0xFF)
+                else:
+                    line += struct.pack(">H", value)
+        previous = previous or bytes(len(line))
+        step = len(row[0]) * sample if row else 1
+        raw.append(filter_type)
+        raw += _apply_filter(bytes(line), previous, step, filter_type)
+        previous = bytes(line)
+
+    header = struct.pack(">IIBBBBB", width, height, depth, colour_type, 0, 0, interlace)
+    body = b"".join(_png_chunk(kind, data) for kind, data in (extra_chunks or []))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", header)
+        + body
+        + _png_chunk(b"IDAT", zlib.compress(bytes(raw)))
+        + _png_chunk(b"IEND", b"")
+    )
+    return path

@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
+from . import png
 from .config import OcrConfig
 from .util import parse_date
 
@@ -244,7 +246,8 @@ def _image_converter() -> str | None:
     return None
 
 
-def _to_png(src: Path, dst: Path, timeout: int) -> None:
+def _to_png(src: Path, dst: Path, timeout: int, flatten: bool = False) -> None:
+    """Convert an image to PNG, optionally compositing away its transparency."""
     tool = _image_converter()
     if tool is None:
         raise OcrError(
@@ -256,10 +259,55 @@ def _to_png(src: Path, dst: Path, timeout: int) -> None:
     elif tool == "heif-convert":
         cmd = ["heif-convert", str(src), str(dst)]
     else:
-        cmd = [tool, str(src), str(dst)]
+        # -alpha remove composites onto the background; -alpha off drops the
+        # now-pointless channel, which is what ocrmypdf objects to.
+        alpha = ["-background", "white", "-alpha", "remove", "-alpha", "off"] if flatten else []
+        cmd = [tool, str(src), *alpha, str(dst)]
     result = _run(cmd, timeout)
     if result.returncode != 0 or not dst.exists():
         raise OcrError(f"{tool} could not convert {src.name}: {result.stderr.strip()[:300]}")
+
+
+# ocrmypdf's own words when it hits transparency. Worth matching on, because
+# the fix is ours to make rather than something to report to the user.
+ALPHA_REFUSAL = "alpha channel"
+
+
+def _flatten_alpha(source: Path, dst: Path, timeout: int) -> Path:
+    """A copy of `source` with no alpha channel, or `source` if it has none.
+
+    ocrmypdf refuses transparency outright, which is every screenshot ever
+    taken. Doing it ourselves means a screenshot does not need ImageMagick
+    installed to be readable; ImageMagick is the fallback for the PNGs we do
+    not rewrite (interlaced, palette + tRNS) and for anything else.
+    """
+    if source.suffix.lower() != ".png" or not png.has_alpha(source):
+        return source
+    try:
+        png.flatten(source, dst)
+        return dst
+    except (png.UnsupportedPng, OSError, struct.error) as exc:
+        log.debug("%s: %s; trying an image tool instead", source.name, exc)
+    if _image_converter() is None:
+        # Not fatal: tesseract reads transparency happily, and the OCR call
+        # below falls back to it when ocrmypdf refuses.
+        return source
+    try:
+        _to_png(source, dst, timeout, flatten=True)
+    except OcrError as exc:
+        log.debug("%s: %s", source.name, exc)
+        return source
+    return dst if dst.exists() else source
+
+
+def _tesseract_pdf(source: Path, dst: Path, config: OcrConfig, name: str) -> None:
+    stem = dst.with_suffix("")
+    result = _run(
+        ["tesseract", str(source), str(stem), "-l", config.languages, "pdf"],
+        config.timeout,
+    )
+    if result.returncode != 0 or not dst.exists():
+        raise OcrError(f"tesseract could not read {name}: {result.stderr.strip()[:300]}")
 
 
 def image_to_pdf(src: Path, dst: Path, config: OcrConfig) -> str:
@@ -272,11 +320,17 @@ def image_to_pdf(src: Path, dst: Path, config: OcrConfig) -> str:
         )
 
     source = src
-    tmp_png: Path | None = None
+    temporary: list[Path] = []
     if src.suffix.lower() in NEEDS_CONVERSION:
-        tmp_png = dst.with_suffix(".converted.png")
-        _to_png(src, tmp_png, config.timeout)
-        source = tmp_png
+        converted = dst.with_suffix(".converted.png")
+        _to_png(src, converted, config.timeout, flatten=True)
+        temporary.append(converted)
+        source = converted
+
+    flattened = _flatten_alpha(source, dst.with_suffix(".flat.png"), config.timeout)
+    if flattened != source:
+        temporary.append(flattened)
+        source = flattened
 
     try:
         if backend == "ocrmypdf":
@@ -293,23 +347,25 @@ def image_to_pdf(src: Path, dst: Path, config: OcrConfig) -> str:
             ]
             result = _run(cmd, config.timeout)
             if result.returncode != 0 or not dst.exists():
+                if ALPHA_REFUSAL in result.stderr and shutil.which("tesseract"):
+                    # Transparency we could not remove ourselves - an
+                    # interlaced PNG, a TIFF with an alpha channel. tesseract
+                    # does not mind it, and ocrmypdf ships with tesseract.
+                    log.info(
+                        "%s has transparency ocrmypdf will not read; using tesseract",
+                        src.name,
+                    )
+                    _tesseract_pdf(source, dst, config, src.name)
+                    return "tesseract"
                 raise OcrError(
                     f"ocrmypdf could not read {src.name} ({result.returncode}): "
                     f"{result.stderr.strip()[:300]}"
                 )
         else:
-            stem = dst.with_suffix("")
-            result = _run(
-                ["tesseract", str(source), str(stem), "-l", config.languages, "pdf"],
-                config.timeout,
-            )
-            if result.returncode != 0 or not dst.exists():
-                raise OcrError(
-                    f"tesseract could not read {src.name}: {result.stderr.strip()[:300]}"
-                )
+            _tesseract_pdf(source, dst, config, src.name)
     finally:
-        if tmp_png is not None:
-            tmp_png.unlink(missing_ok=True)
+        for path in temporary:
+            path.unlink(missing_ok=True)
     return backend
 
 
