@@ -327,7 +327,8 @@ class TestOrganizeFlowsThrough(unittest.TestCase):
         client = SlowClient(RESPONSE, delay=0.2)
         report = plan(self.config, client=client)
         client.peak = 0
-        started = time.monotonic()
         organizer_apply(report, self.config, client=client)
+        # Overlap is the claim; wall-clock on a shared CI runner is not
+        # something to assert on, and `test_work_actually_overlaps` covers the
+        # pool's timing directly.
         self.assertGreater(client.peak, 1)
-        self.assertLess(time.monotonic() - started, 4 * 0.2)
