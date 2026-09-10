@@ -109,12 +109,12 @@ class TestPreviewIsTheDefault(unittest.TestCase):
         code, out = run(["-q", "init-vault", "--vault", str(self.vault)])
         self.assertEqual(code, 0)
         self.assertIn("would create", out)
-        self.assertFalse((self.vault / "4 Archive").exists())
+        self.assertFalse((self.vault / "Archive").exists())
 
         code, out = run(["-q", "init-vault", "--vault", str(self.vault), "--apply"])
         self.assertEqual(code, 0)
         self.assertIn("created:", out)
-        self.assertTrue((self.vault / "4 Archive/4 Archive.md").is_file())
+        self.assertTrue((self.vault / "Archive/Archive.md").is_file())
 
     def test_init_config_previews_by_default(self):
         target = self.root / "scanvault.toml"

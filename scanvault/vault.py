@@ -92,6 +92,11 @@ def parse_frontmatter(content: str) -> tuple[dict[str, Any], str]:
     return data, content[match.end() :]
 
 
+FLAT_INDEX_NOTE = (
+    "Scanned documents are filed here by category and year. The note beside "
+    "each PDF carries its metadata; the tags are what you search."
+)
+
 PARA_INDEX_NOTES = {
     "project": "Short-term efforts with a goal and a finish line. Move a "
     "document here by setting `para: project` in its frontmatter.",
@@ -160,6 +165,8 @@ class Vault:
 
     def bucket_from_path(self, path: Path) -> str | None:
         """Which PARA folder a file currently sits in, if any."""
+        if self.config.vault.layout != "para":
+            return None
         try:
             relative = path.relative_to(self.root)
         except ValueError:
@@ -172,9 +179,21 @@ class Vault:
                 return bucket
         return None
 
+    def root_folder(self, meta: DocumentMeta) -> str:
+        """The folder everything else hangs from.
+
+        One folder under the flat layout; the document's PARA folder when the
+        vault is organised that way.
+        """
+        if self.config.vault.layout == "para":
+            return self.para_folder(meta.para)
+        return self.config.vault.documents_dir
+
     def _render_template(self, template: str, meta: DocumentMeta) -> Path:
         values = {k: safe_filename(v) for k, v in meta.placeholders().items()}
-        values["para"] = safe_filename(self.para_folder(meta.para))
+        root = safe_filename(self.root_folder(meta)) if self.root_folder(meta) else ""
+        # `para` is the old name for this placeholder; existing configs still work.
+        values["root"] = values["para"] = root
         try:
             rendered = template.format(**values)
         except KeyError as exc:
@@ -295,7 +314,9 @@ class Vault:
         return WriteResult(note, attachment)
 
     def scaffold(self, dry_run: bool = False) -> list[Path]:
-        """Create the PARA folders and their index notes. Never overwrites."""
+        """Create the folders documents will land in. Never overwrites."""
+        if self.config.vault.layout != "para":
+            return self._scaffold_flat(dry_run)
         created: list[Path] = []
         for bucket, folder in self.config.vault.para.buckets().items():
             directory = self.root / folder
@@ -311,6 +332,21 @@ class Vault:
                 f"{body}\n\n# {folder}\n\n{PARA_INDEX_NOTES[bucket]}\n", encoding="utf-8"
             )
         return created
+
+    def _scaffold_flat(self, dry_run: bool = False) -> list[Path]:
+        folder = self.config.vault.documents_dir
+        if not folder:
+            return []
+        index = self.root / folder / f"{folder}.md"
+        if index.exists():
+            return []
+        if not dry_run:
+            index.parent.mkdir(parents=True, exist_ok=True)
+            body = dump_frontmatter({"title": folder, "para_index": True})
+            index.write_text(
+                f"{body}\n\n# {folder}\n\n{FLAT_INDEX_NOTE}\n", encoding="utf-8"
+            )
+        return [index]
 
     # ---- reading ----------------------------------------------------------
 

@@ -81,7 +81,7 @@ class TestFilesOnDisk(unittest.TestCase):
 
         self.assertEqual(
             result.note_path.relative_to(self.root).as_posix(),
-            "4 Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md",
+            "Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md",
         )
         self.assertEqual(
             result.attachment_path.name, "2021-02-07 Example Bank - Annual statement.pdf"

@@ -402,11 +402,19 @@ class VaultConfig:
     notes_dir: str = ""
     attachments_dir: str = ""
     para: ParaConfig = field(default_factory=ParaConfig)
-    # Available placeholders: para, category, year, month, date, name, title,
-    # slug, correspondent. `name` is correspondent + title, which is what makes
-    # a filename readable on its own.
-    note_path_template: str = "{para}/{category}/{year}/{date} {name}"
-    attachment_path_template: str = "{para}/_attachments/{category}/{year}/{date} {name}"
+    # "flat" puts every document under one folder, because scanned paper is all
+    # reference material and PARA's other three folders stay empty. "para" keeps
+    # the four Second Brain folders for a vault that is already organised that
+    # way.
+    layout: str = "flat"
+    # The folder documents live in under the flat layout. "" is the vault root.
+    documents_dir: str = "Archive"
+    # Available placeholders: root, category, year, month, date, name, title,
+    # slug, correspondent. `root` is the documents folder, or the PARA folder
+    # when the layout is "para"; `name` is correspondent + title, which is what
+    # makes a filename readable on its own.
+    note_path_template: str = "{root}/{category}/{year}/{date} {name}"
+    attachment_path_template: str = "{root}/_attachments/{category}/{year}/{date} {name}"
     # move | copy | leave
     source_action: str = "move"
     # Turn the folder a document came from into tags, so an existing folder

@@ -33,7 +33,7 @@ class TestScaffold(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "vault"
-        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.config = load_config(overrides={"vault_dir": str(self.root), "vault.layout": "para"})
         self.vault = Vault(self.config)
 
     def tearDown(self):
@@ -74,7 +74,7 @@ class TestBucketRouting(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "vault"
-        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.config = load_config(overrides={"vault_dir": str(self.root), "vault.layout": "para"})
         self.vault = Vault(self.config)
         self.vault.scaffold()
 
@@ -173,7 +173,7 @@ class TestUnmanagedNotes(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "vault"
-        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.config = load_config(overrides={"vault_dir": str(self.root), "vault.layout": "para"})
         self.vault = Vault(self.config)
         self.vault.scaffold()
         self.hand_written = self.root / "1 Projects/Kitchen renovation/Plan.md"
@@ -218,7 +218,7 @@ class TestLegacyLayoutMigration(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "vault"
-        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.config = load_config(overrides={"vault_dir": str(self.root), "vault.layout": "para"})
         note = self.root / "Documents/Invoices/2024/2024-05-02 Acme Invoice.md"
         pdf = self.root / "Attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf"
         note.parent.mkdir(parents=True)
@@ -261,3 +261,67 @@ class TestLegacyLayoutMigration(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFlatLayoutIsTheDefault(unittest.TestCase):
+    """PARA's other three folders stayed empty, so one folder is the default."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "vault"
+        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.vault = Vault(self.config)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_documents_land_in_one_folder(self):
+        self.assertEqual(self.config.vault.layout, "flat")
+        self.assertEqual(
+            self.vault.note_path(meta()).relative_to(self.root).as_posix(),
+            "Archive/Invoices/2024/2024-05-02 Acme Invoice.md",
+        )
+
+    def test_the_scaffold_is_one_folder_too(self):
+        self.vault.scaffold()
+        self.assertEqual([p.name for p in self.root.iterdir()], ["Archive"])
+        self.assertTrue((self.root / "Archive/Archive.md").is_file())
+
+    def test_the_folder_is_configurable(self):
+        self.config.vault.documents_dir = "Scanned"
+        self.assertEqual(
+            self.vault.note_path(meta()).relative_to(self.root).parts[0], "Scanned"
+        )
+
+    def test_it_can_be_the_vault_root(self):
+        self.config.vault.documents_dir = ""
+        self.assertEqual(
+            self.vault.note_path(meta()).relative_to(self.root).as_posix(),
+            "Invoices/2024/2024-05-02 Acme Invoice.md",
+        )
+        self.assertEqual(self.vault.scaffold(), [], "nothing to scaffold at the root")
+
+    def test_para_buckets_are_ignored_rather_than_half_applied(self):
+        self.assertEqual(
+            self.vault.note_path(meta(para="project")).relative_to(self.root).parts[0],
+            "Archive",
+        )
+        self.assertIsNone(self.vault.bucket_from_path(self.root / "1 Projects/x.md"))
+
+    def test_the_old_placeholder_still_works(self):
+        self.config.vault.note_path_template = "{para}/{category}/{date} {title}"
+        self.assertEqual(
+            self.vault.note_path(meta()).relative_to(self.root).as_posix(),
+            "Archive/Invoices/2024-05-02 Acme Invoice.md",
+        )
+
+    def test_switching_to_para_brings_the_four_folders_back(self):
+        self.config.vault.layout = "para"
+        self.vault.scaffold()
+        self.assertEqual(
+            sorted(p.name for p in self.root.iterdir()),
+            ["1 Projects", "2 Areas", "3 Resources", "4 Archive"],
+        )
+        self.assertEqual(
+            self.vault.note_path(meta()).relative_to(self.root).parts[0], "4 Archive"
+        )

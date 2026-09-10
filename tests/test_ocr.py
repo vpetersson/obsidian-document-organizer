@@ -79,8 +79,8 @@ class TestOcrBackends(unittest.TestCase):
         report = ingest(config, client=client)
         self.assertEqual(report.count("ingested"), 1, report.results)
 
-        note = vault_dir / "4 Archive/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice INV-1234.md"
-        attachment = vault_dir / "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice INV-1234.pdf"
+        note = vault_dir / "Archive/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice INV-1234.md"
+        attachment = vault_dir / "Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice INV-1234.pdf"
         self.assertTrue(note.is_file())
         frontmatter, body = parse_frontmatter(note.read_text())
         self.assertIn(frontmatter["ocr"], ("ocrmypdf", "tesseract"))

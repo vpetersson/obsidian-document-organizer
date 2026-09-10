@@ -114,7 +114,7 @@ class TestPreviewThenApply(unittest.TestCase):
         report = plan(self.config, client=apply_client)
         organizer_apply(report, self.config, client=apply_client)
         self.assertEqual(len(apply_client.calls), 0, "no note was sent to the model twice")
-        self.assertTrue(list((self.root / "4 Archive").rglob("*.md")))
+        self.assertTrue(list((self.root / "Archive").rglob("*.md")))
 
     def test_no_cache_asks_again(self):
         first = StubClient(RESPONSE)

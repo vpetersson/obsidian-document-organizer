@@ -56,13 +56,13 @@ class TestOrganizer(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.vault_dir = Path(self.tmp.name) / "vault"
         self.config = load_config(overrides={"vault_dir": str(self.vault_dir)})
-        (self.vault_dir / "4 Archive").mkdir(parents=True)
+        (self.vault_dir / "Archive").mkdir(parents=True)
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def write_note(self, relative: str, content: str) -> Path:
-        path = self.vault_dir / "4 Archive" / relative
+        path = self.vault_dir / "Archive" / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path
@@ -78,7 +78,7 @@ class TestOrganizer(unittest.TestCase):
         self.assertTrue(note.is_file(), "planning must not move anything")
 
         organizer_apply(report, self.config, client=None)
-        moved = self.vault_dir / "4 Archive/Contracts/2023/2023-01-15 Rental Agreement.md"
+        moved = self.vault_dir / "Archive/Contracts/2023/2023-01-15 Rental Agreement.md"
         self.assertTrue(moved.is_file())
         self.assertFalse(note.exists())
         self.assertFalse(note.parent.exists(), "the emptied folder should be pruned")
@@ -107,13 +107,13 @@ class TestOrganizer(unittest.TestCase):
         organizer_apply(report, self.config, client=client)
 
         self.assertIn("RENTAL AGREEMENT", client.calls[0][1], "the model should see the PDF text")
-        moved = self.vault_dir / "4 Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
+        moved = self.vault_dir / "Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
         self.assertTrue(moved.is_file())
         frontmatter, body = parse_frontmatter(moved.read_text())
         self.assertEqual(frontmatter["correspondent"], "Landlord Ltd")
         self.assertEqual(
             frontmatter["attachment"],
-            "4 Archive/_attachments/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.pdf",
+            "Archive/_attachments/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.pdf",
         )
         self.assertTrue((self.vault_dir / frontmatter["attachment"]).is_file())
         self.assertFalse(pdf.exists(), "the attachment should have moved with the note")
@@ -128,7 +128,7 @@ class TestOrganizer(unittest.TestCase):
         self.assertTrue(
             (
                 self.vault_dir
-                / "4 Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
+                / "Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
             ).is_file()
         )
 
@@ -152,7 +152,7 @@ class TestOrganizer(unittest.TestCase):
         organizer_apply(report, self.config, client=client)
         note = (
             self.vault_dir
-            / "4 Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
+            / "Archive/Contracts/2023/2023-01-15 Landlord Ltd - Rental Agreement.md"
         )
         frontmatter, body = parse_frontmatter(note.read_text())
         self.assertEqual(frontmatter["correspondent"], "Landlord Ltd")
@@ -166,7 +166,7 @@ class TestOrganizer(unittest.TestCase):
         report.actions[0].meta = None  # force an exception on the first action
         organizer_apply(report, self.config, client=None)
         self.assertEqual(report.count("failed"), 1)
-        self.assertTrue((self.vault_dir / "4 Archive/Other/undated/undated B.md").is_file())
+        self.assertTrue((self.vault_dir / "Archive/Other/undated/undated B.md").is_file())
 
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ class TestNotesOnDisk(unittest.TestCase):
         self.assertIn("Sort code 00-00-00", content, "the text is still searchable")
 
     def test_a_note_written_the_old_way_is_offered_for_rewrite(self):
-        note = self.root / "4 Archive/Banking/2024/2024-05-02 Statement.md"
+        note = self.root / "Archive/Banking/2024/2024-05-02 Statement.md"
         note.parent.mkdir(parents=True, exist_ok=True)
         note.write_text(
             '---\ntitle: "Statement"\ndate: 2024-05-02\ncategory: "Banking"\n'

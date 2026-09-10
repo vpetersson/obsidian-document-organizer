@@ -23,9 +23,9 @@ files you own in a folder you chose. The package and CLI are called `scanvault`.
   whose metadata is missing or whose location no longer matches the configured
   layout.
 
-The vault is laid out as a PARA ("Second Brain") structure, with the archive as
-its cornerstone — scanned paper is reference material, so that is where it
-lands. See [Vault layout](#vault-layout-para).
+Documents are filed by category and year under one folder. If your vault is a
+PARA ("Second Brain") vault, `layout = "para"` puts them in `4 Archive` inside
+it instead. See [Vault layout](#vault-layout).
 
 No Python dependencies — the standard library only. External tools (OCR engine,
 ollama) are detected at runtime and reported by `scanvault doctor`.
@@ -168,12 +168,8 @@ scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
 
 ```
 Archive/
-├── 1 Projects/
-├── 2 Areas/
-├── 3 Resources/
-├── 4 Archive/
-│   ├── Invoices/2024/2024-05-02 Acme Invoice INV-1234.md
-│   └── _attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf
+├── Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.md
+├── _attachments/Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf
 └── .scanvault/index.json
 ```
 
@@ -203,14 +199,14 @@ source_file: "scan_001.pdf"
 source_hash: "9f2c…"
 ocr: "ocrmypdf"
 pages: 2
-attachment: "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf"
+attachment: "Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf"
 ---
 
 # Acme Invoice INV-1234
 
 Invoice INV-1234 from Acme Ltd for 120.00 EUR.
 
-![[4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf]]
+![[Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf]]
 
 > [!quote]- Extracted text
 > ```text
@@ -242,10 +238,10 @@ scanvault organize --vault ~/Obsidian/Archive
 ```
 
 ```
-[dry-run] ocr: 4 Archive/Invoices/2024/2024-05-02 Acme Invoice.md (attachment has no text layer)
-[dry-run] relocate: 4 Archive/Unsorted/old.md -> 4 Archive/Contracts/2022/2022-02-02 Old Note.md (layout drift)
-[dry-run] adopt: Work receipts/scan-2017-03-05.pdf (image-only PDF; will OCR, classify and file under "4 Archive")
-[dry-run] duplicate: Work receipts/scan-2017-03-05 - 1.pdf (same content as 4 Archive/Receipts/2017/2017-03-05 Coffee House.md)
+[dry-run] ocr: Archive/Invoices/2024/2024-05-02 Acme Invoice.md (attachment has no text layer)
+[dry-run] relocate: Archive/Unsorted/old.md -> Archive/Contracts/2022/2022-02-02 Old Note.md (layout drift)
+[dry-run] adopt: Work receipts/scan-2017-03-05.pdf (image-only PDF; will OCR, classify and file under "Archive")
+[dry-run] duplicate: Work receipts/scan-2017-03-05 - 1.pdf (same content as Archive/Receipts/2017/2017-03-05 Coffee House.md)
 
 1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt (1 of them need OCR), 12 already filed, 1 duplicates, 3 left alone, 0 failed
 3 notes were left alone because scanvault did not write them; pass --include-unmanaged to file those too, or -v to list them.
@@ -499,9 +495,9 @@ searchable PDF, and that PDF is what gets filed, classified and named — exactl
 as if it had arrived as a PDF:
 
 ```
-4 Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md
-4 Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf
-4 Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.jpg
+Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md
+Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf
+Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.jpg
 ```
 
 The photo it came from is kept next to the PDF and recorded as `original:` in the
@@ -521,8 +517,8 @@ Neither is a name, so neither is kept: the note *and the PDF* are named from wha
 the document turned out to be.
 
 ```
-4 Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md
-4 Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf
+Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md
+Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf
 ```
 
 That is `{date} {name}`, where `{name}` is the correspondent and the title
@@ -542,34 +538,43 @@ from in `title_source` (`model`, `text` or `filename`), so
 Renaming an existing vault is `organize --apply`: it will show every document
 whose filename does not match its metadata as a `relocate`.
 
-## Vault layout (PARA)
+## Vault layout
 
-The four folders are the PARA framework from *Building a Second Brain*:
+Everything lands in one folder, by category and year:
 
-| Folder | What belongs there |
-| --- | --- |
-| `1 Projects` | Short-term efforts with a goal and a finish line |
-| `2 Areas` | Ongoing responsibilities you maintain over time |
-| `3 Resources` | Topics and reference material you are not actively working |
-| `4 Archive` | Everything inactive — **and the default home for every scan** |
+```
+Archive/
+├── Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.md
+└── _attachments/Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf
+```
 
-`scanvault init-vault --vault ~/Obsidian/Archive --apply` creates the four folders
-with a short index note in each; `ingest --apply` also creates them on first run.
-Both are idempotent and never overwrite an existing note.
+`[vault] documents_dir` names that folder — `Archive` by default, `""` to file
+straight into the vault root — and the path templates are yours to change.
 
-Documents move between buckets in two ways, and the organizer honours both:
+### If your vault is a Second Brain
 
-* **Frontmatter.** Set `para: project` (or `area`, `resource`, `archive`) in a
-  note and the next `organize --apply` moves the note *and its PDF* into that
-  folder.
-* **Location.** Drag a note into `1 Projects/` in Obsidian and leave the
-  frontmatter alone — the organizer reads the bucket from where the note now
-  lives instead of dragging it back to the archive.
+Scanned paper is reference material: it is *all* archive, which is why PARA's
+other three folders sat empty. Set `layout = "para"` if your vault is organised
+that way and you want documents to live inside it:
 
-Notes that scanvault did not write are left alone entirely: your own project and
-area notes are never moved, even though they live in the same vault. Pass
-`--include-unmanaged` to `organize` if you *do* want hand-made notes filed by the
-same rules.
+```toml
+[vault]
+layout = "para"      # 1 Projects, 2 Areas, 3 Resources, 4 Archive
+```
+
+Then documents still land in `4 Archive`, and move between buckets in two ways
+the organizer honours: set `para: project` in a note's frontmatter, or drag the
+note into `1 Projects/` and leave the frontmatter alone — the bucket is read from
+where the note now lives rather than dragged back.
+
+Either way, notes scanvault did not write are left alone: your own project and
+area notes are never moved. `--include-unmanaged` opts them in.
+
+### Moving an existing vault between layouts
+
+`organize --apply`. Switching from PARA to flat reports every document as
+`relocate: Archive/… -> Archive/…`; notes and PDFs move together and links are
+rewritten.
 
 ### Upgrading from 0.2
 
@@ -625,8 +630,10 @@ fallbacks = ["filename", "pdf-metadata", "file-created"]
 [vault]
 notes_dir = ""                     # the PARA folders live at the vault root
 attachments_dir = ""
-note_path_template = "{para}/{category}/{year}/{date} {name}"
-attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {name}"
+layout = "flat"                    # flat | para
+documents_dir = "Archive"          # the folder documents live in ("" = vault root)
+note_path_template = "{root}/{category}/{year}/{date} {name}"
+attachment_path_template = "{root}/_attachments/{category}/{year}/{date} {name}"
 source_action = "move"             # move | copy | leave
 keep_original_image = true         # keep the photo an image document came from
 include_text = true
@@ -640,9 +647,9 @@ archive_dir = "4 Archive"
 default_bucket = "archive"         # where a new scan goes
 ```
 
-Template placeholders: `{para} {category} {year} {month} {date} {name} {title} {slug} {correspondent}`,
-where `{para}` is the folder for the note's bucket. Drop `{para}` from the
-templates for a flat, non-PARA vault.
+Template placeholders: `{root} {category} {year} {month} {date} {name} {title} {slug} {correspondent}`,
+where `{root}` is the documents folder — or the note's PARA folder when
+`layout = "para"`. `{para}` still works as an alias.
 Undated documents get `undated` for `{date}`/`{year}`, so nothing is silently
 misfiled. Filenames are sanitised, and a name collision appends `-2`, `-3`, …
 

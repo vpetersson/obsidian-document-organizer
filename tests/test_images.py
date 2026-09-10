@@ -73,8 +73,8 @@ class TestImagesAreFiled(unittest.TestCase):
         report = ingest(self.config, client=StubClient(RESPONSE))
         self.assertEqual(report.count("ingested"), 1, report.results)
 
-        note = self.vault / "4 Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md"
-        pdf = self.vault / "4 Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf"
+        note = self.vault / "Archive/Banking/2021/2021-02-07 Example Bank - Annual statement.md"
+        pdf = self.vault / "Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf"
         jpg = pdf.with_suffix(".jpg")
         self.assertTrue(note.is_file())
         self.assertTrue(pdf.is_file(), "the searchable PDF is what gets filed")
@@ -122,7 +122,7 @@ class TestImagesInAVault(unittest.TestCase):
     def test_applying_converts_and_files_it(self):
         client = StubClient(RESPONSE)
         organizer_apply(plan(self.config, client=client), self.config, client=client)
-        filed = self.vault / "4 Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf"
+        filed = self.vault / "Archive/_attachments/Banking/2021/2021-02-07 Example Bank - Annual statement.pdf"
         self.assertTrue(filed.is_file())
         self.assertTrue(filed.with_suffix(".png").is_file())
         self.assertFalse(self.image.exists())

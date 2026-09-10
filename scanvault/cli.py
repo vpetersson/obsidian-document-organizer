@@ -59,15 +59,17 @@ max_tags = 12
 # rules = { boat = ["mooring", "marina"] }   # extends the built-in keyword rules
 
 [vault]
-notes_dir = ""          # PARA folders live at the vault root
+layout = "flat"         # flat | para (PARA's Second Brain folders)
+documents_dir = "Archive"   # the folder documents live in; "" is the vault root
+notes_dir = ""
 attachments_dir = ""
-note_path_template = "{para}/{category}/{year}/{date} {name}"
-attachment_path_template = "{para}/_attachments/{category}/{year}/{date} {name}"
+note_path_template = "{root}/{category}/{year}/{date} {name}"
+attachment_path_template = "{root}/_attachments/{category}/{year}/{date} {name}"
 source_action = "move"  # move | copy | leave
 include_text = true
 extracted_text_style = "callout"   # callout (folded) | details | plain
 
-[vault.para]
+[vault.para]              # only used when layout = "para"
 projects_dir = "1 Projects"
 areas_dir = "2 Areas"
 resources_dir = "3 Resources"
