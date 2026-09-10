@@ -15,6 +15,7 @@ from .config import Config
 from .extract import DOCUMENT_SUFFIXES, ExtractResult, OcrError, extract, is_image
 from .llm import OllamaClient
 from .state import State
+from .tags import TagLedger, ledger_for, report_folded
 from .util import sha256_file, slugify
 from .vault import Vault
 
@@ -110,6 +111,7 @@ def prepare_document(
     bucket: str | None = None,
     source_root: Path | None = None,
     cache: ClassificationCache | None = None,
+    ledger: TagLedger | None = None,
 ) -> Prepared:
     """Hash, OCR and classify one document. Touches nothing in the vault."""
     digest = sha256_file(path)
@@ -134,7 +136,7 @@ def prepare_document(
             path, digest, ProcessResult(path, "failed", error=f"{type(exc).__name__}: {exc}")
         )
 
-    meta = classify(extracted.text, config, client, source=path, cache=cache)
+    meta = classify(extracted.text, config, client, source=path, cache=cache, ledger=ledger)
     resolve_date(meta, path, config, extracted.text)
     meta.para = bucket or config.vault.para.default_bucket
     folder = source_folder(path, source_root)
@@ -253,6 +255,7 @@ def ingest(
     cache: ClassificationCache | None = None,
     use_cache: bool = True,
     on_result: Callable[[ProcessResult], None] | None = None,
+    ledger: TagLedger | None = None,
 ) -> Report:
     """Ingest every PDF under config.source_dir (or an explicit list of paths)."""
     if config.vault_dir is None:
@@ -264,6 +267,11 @@ def ingest(
         # A vault that only ever sees `ingest` should get the snippet too.
         vault.write_css_snippet()
     state = State(config.state_root) if use_state else None
+    own_ledger = ledger is None
+    if own_ledger:
+        # Seeded from the vault, so a new document reuses the words already in
+        # it instead of inventing a near-copy of each one.
+        ledger = ledger_for(config, vault)
     own_cache = cache is None
     if own_cache:
         cache = ClassificationCache(config.state_root, config, enabled=use_cache)
@@ -281,7 +289,13 @@ def ingest(
     def prepare(path: Path) -> Prepared:
         started = progress.start(path.name)
         prepared = prepare_document(
-            path, config, client, state, source_root=config.source_dir, cache=cache
+            path,
+            config,
+            client,
+            state,
+            source_root=config.source_dir,
+            cache=cache,
+            ledger=ledger,
         )
         progress.finish(path.name, started)
         return prepared
@@ -309,6 +323,10 @@ def ingest(
     if own_cache and cache is not None:
         # Written even on a dry run: reusing it is the point.
         cache.save()
+    if own_ledger and ledger is not None:
+        report_folded(ledger)
+        if not dry_run:
+            ledger.save(config.state_root)
     return report
 
 

@@ -536,6 +536,23 @@ class Vault:
                 continue
             yield path
 
+    def iter_note_tags(self) -> Iterator[list[str]]:
+        """Every note's tags, so the vocabulary already in the vault is known.
+
+        Notes scanvault did not write count too: fighting someone's own tags
+        with near-copies of them is the problem, not the solution.
+        """
+        for note in self.iter_notes():
+            try:
+                data, _ = self.read_note(note)
+            except OSError:
+                continue
+            tags = data.get("tags")
+            if isinstance(tags, str):
+                tags = [tags]
+            if isinstance(tags, list):
+                yield [tag for tag in tags if isinstance(tag, str)]
+
     def read_note(self, path: Path) -> tuple[dict[str, Any], str]:
         return parse_frontmatter(path.read_text(encoding="utf-8", errors="replace"))
 

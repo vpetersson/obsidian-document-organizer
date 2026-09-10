@@ -24,6 +24,7 @@ from .organizer import plan as organizer_plan
 from .evaluate import evaluate, load_corpus
 from .parallel import parallel_map, resolve_workers
 from .pipeline import ingest, iter_documents, watch
+from .tags import ledger_for
 from .vault import CSS_SNIPPET_NAME, Vault
 
 log = logging.getLogger("scanvault")
@@ -329,6 +330,38 @@ def cmd_init_vault(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tags(args: argparse.Namespace) -> int:
+    """Print the vocabulary. Reads the vault; changes nothing."""
+    config = _build_config(args)
+    if config.vault_dir is None:
+        raise SystemExit("--vault is required")
+    ledger = ledger_for(config, Vault(config))
+    duplicates = ledger.duplicates()
+
+    if args.duplicates:
+        if not duplicates:
+            print("no tag has more than one spelling")
+            return 0
+        print(f"{len(duplicates)} tag(s) spelled more than one way:")
+        for group in duplicates:
+            print(f"  {group.canonical:30s} <- {', '.join(group.variants)}")
+        print("\norganize --apply rewrites the notes that use the other spellings.")
+        return 0
+
+    groups = [g for g in ledger.groups if g.total >= args.min_count]
+    if not groups:
+        print("no tags in this vault yet")
+        return 0
+    width = max(len(group.canonical) for group in groups)
+    for group in groups:
+        variants = f"  <- {', '.join(group.variants)}" if group.variants else ""
+        print(f"{group.total:5d}  {group.canonical:{width}s}{variants}")
+    print(f"\n{len(groups)} tags")
+    if duplicates:
+        print(f"{len(duplicates)} of them are spelled more than one way - see --duplicates")
+    return 0
+
+
 def cmd_eval(args: argparse.Namespace) -> int:
     config = _build_config(args)
     client = _client(args, config)
@@ -607,6 +640,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument("--corpus", help="path to a corpus JSON file")
     add_llm_flags(p_eval)
     p_eval.set_defaults(func=cmd_eval)
+
+    p_tags = sub.add_parser(
+        "tags",
+        help="the vault's tag vocabulary, and the near-duplicates in it",
+        parents=[verbosity],
+    )
+    p_tags.add_argument("--vault")
+    p_tags.add_argument(
+        "--duplicates",
+        action="store_true",
+        help="only the tags that have more than one spelling",
+    )
+    p_tags.add_argument(
+        "--min-count", type=int, default=1, help="hide tags used fewer times than this"
+    )
+    p_tags.set_defaults(func=cmd_tags)
 
     p_doctor = sub.add_parser(
         "doctor", help="check OCR backends, ollama and the model", parents=[verbosity]
