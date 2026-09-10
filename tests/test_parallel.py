@@ -205,3 +205,129 @@ class TestAdoptInParallel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDocumentsFlowThroughIndividually(unittest.TestCase):
+    """Not "classify everything, then file everything" - each document goes
+    read, classify, written on its own."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.source = self.root / "inbox"
+        self.config = load_config(
+            overrides={"source_dir": str(self.source), "vault_dir": str(self.root / "vault")}
+        )
+        self.config.llm.workers = 4
+        # The first document is the slow one; if filing waited for the whole
+        # batch, nothing would be written until it finished.
+        for index in range(6):
+            make_text_pdf(self.source / f"scan_{index}.pdf", [f"Document {index}"] + LINES)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _record_writes(self):
+        from scanvault.vault import Vault
+
+        written: list[str] = []
+        lock = threading.Lock()
+        original = Vault.write_document
+
+        def spy(vault_self, meta, text, *args, **kwargs):
+            result = original(vault_self, meta, text, *args, **kwargs)
+            with lock:
+                written.append(kwargs.get("source_path", args[1] if len(args) > 1 else None))
+            return result
+
+        return written, spy, original
+
+    def test_later_documents_are_filed_before_a_slow_first_one(self):
+        from unittest.mock import patch
+
+        from scanvault.vault import Vault
+
+        class UnevenClient(SlowClient):
+            def chat_json(self, system: str, user: str, schema=None, images=None) -> dict:
+                # "Document 0" is in the excerpt of the first document only.
+                self.delay = 0.45 if "Document 0" in user else 0.02
+                return super().chat_json(system, user, schema, images)
+
+        written, spy, _ = self._record_writes()
+        with patch.object(Vault, "write_document", spy):
+            report = ingest(self.config, client=UnevenClient(RESPONSE))
+
+        self.assertEqual(report.count("ingested"), 6, report.results)
+        names = [Path(str(path)).name for path in written if path]
+        self.assertEqual(len(names), 6)
+        self.assertNotEqual(
+            names[0],
+            "scan_0.pdf",
+            "the slow document should not have held up the ones behind it",
+        )
+
+    def test_the_results_are_still_in_input_order(self):
+        report = ingest(self.config, client=StubClient(RESPONSE))
+        self.assertEqual(
+            [result.source.name for result in report.results],
+            [f"scan_{index}.pdf" for index in range(6)],
+        )
+
+    def test_a_crash_half_way_leaves_the_finished_documents_filed(self):
+        class Exploding(StubClient):
+            def __init__(self, response):
+                super().__init__(response)
+                self.seen = 0
+                self._lock = threading.Lock()
+
+            def chat_json(self, system: str, user: str, schema=None, images=None) -> dict:
+                with self._lock:
+                    self.seen += 1
+                    if self.seen == 4:
+                        raise RuntimeError("model fell over")
+                return super().chat_json(system, user, schema, images)
+
+        self.config.llm.fallback_to_heuristics = False
+        report = ingest(self.config, client=Exploding(RESPONSE))
+        filed = list((self.root / "vault").rglob("*.md"))
+        self.assertGreaterEqual(len(filed), 4, "work done before the failure survives")
+        self.assertEqual(report.count("ingested") + report.count("failed"), 6)
+
+
+class TestOrganizeFlowsThrough(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / "vault"
+        self.config = load_config(overrides={"vault_dir": str(self.root)})
+        self.config.llm.workers = 4
+        for index in range(4):
+            make_text_pdf(self.root / "Inbox" / f"scan_{index}.pdf", [f"Document {index}"] + LINES)
+        note = self.root / "Archive/Other/2024/2024-05-02 Old.md"
+        note.parent.mkdir(parents=True, exist_ok=True)
+        note.write_text(
+            '---\ntitle: "Old"\ndate: 2024-05-02\ncategory: "Other"\ntags:\n  - scan\n'
+            'classifier: "llm"\n---\n\n# Old\n',
+            encoding="utf-8",
+        )
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_adopting_and_relocating_both_happen(self):
+        client = SlowClient(RESPONSE, delay=0.05)
+        report = plan(self.config, client=client)
+        organizer_apply(report, self.config, client=client)
+
+        self.assertEqual(report.count("adopt"), 4)
+        filed = sorted(p.name for p in (self.root / "Archive").rglob("*.md"))
+        self.assertEqual(len(filed), 5, filed)
+        self.assertEqual(list(self.root.rglob("*.ocr.pdf")), [])
+
+    def test_the_slow_actions_overlap(self):
+        client = SlowClient(RESPONSE, delay=0.2)
+        report = plan(self.config, client=client)
+        client.peak = 0
+        started = time.monotonic()
+        organizer_apply(report, self.config, client=client)
+        self.assertGreater(client.peak, 1)
+        self.assertLess(time.monotonic() - started, 4 * 0.2)
