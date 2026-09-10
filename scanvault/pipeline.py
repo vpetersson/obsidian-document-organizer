@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,7 +17,7 @@ from .extract import DOCUMENT_SUFFIXES, ExtractResult, OcrError, extract, is_ima
 from .llm import OllamaClient
 from .state import State
 from .tags import TagLedger, ledger_for, report_folded
-from .util import sha256_file, slugify
+from .util import sha256_file, slugify, walk_files
 from .vault import Vault
 
 log = logging.getLogger(__name__)
@@ -50,19 +51,40 @@ class Report:
         return [result for result in self.results if result.status == "failed"]
 
 
+# What macOS leaves behind for a file in iCloud Drive that is not on this
+# machine yet: a hidden placeholder, with the real name inside it.
+ICLOUD_PLACEHOLDER = re.compile(r"^\.(?P<name>.+)\.icloud$")
+
+
 def iter_documents(source: Path, recursive: bool = True) -> Iterator[Path]:
     if source.is_file():
         yield source
         return
-    walker = source.rglob("*") if recursive else source.glob("*")
-    for path in sorted(walker):
-        if not path.is_file() or path.suffix.lower() not in SUPPORTED_SUFFIXES:
+    not_downloaded: list[str] = []
+    for path in walk_files(source, recursive):
+        relative = path.relative_to(source).parts
+        if any(part.startswith(".") for part in relative):
+            placeholder = ICLOUD_PLACEHOLDER.match(path.name)
+            if placeholder and Path(placeholder["name"]).suffix.lower() in SUPPORTED_SUFFIXES:
+                not_downloaded.append(placeholder["name"])
             continue
-        if any(part.startswith(".") for part in path.relative_to(source).parts):
+        if path.suffix.lower() not in SUPPORTED_SUFFIXES:
             continue
         if path.name.endswith(".ocr.pdf"):
             continue
         yield path
+    if not_downloaded:
+        # Skipping these is right - there are no bytes to read - but doing it
+        # silently looks exactly like the documents not being there at all.
+        log.warning(
+            "%d file%s in %s %s in iCloud but not downloaded to this machine, so "
+            "there is nothing to read yet (e.g. %s)",
+            len(not_downloaded),
+            "" if len(not_downloaded) == 1 else "s",
+            source,
+            "is" if len(not_downloaded) == 1 else "are",
+            not_downloaded[0],
+        )
 
 
 def source_folder(path: Path, root: Path | None) -> str:
