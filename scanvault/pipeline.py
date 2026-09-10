@@ -6,7 +6,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
 from .cache import ClassificationCache
 from .parallel import Progress, pipeline as run_pipeline, resolve_workers
@@ -252,6 +252,7 @@ def ingest(
     use_state: bool = True,
     cache: ClassificationCache | None = None,
     use_cache: bool = True,
+    on_result: Callable[[ProcessResult], None] | None = None,
 ) -> Report:
     """Ingest every PDF under config.source_dir (or an explicit list of paths)."""
     if config.vault_dir is None:
@@ -276,10 +277,12 @@ def ingest(
     progress = Progress(len(paths))
 
     def prepare(path: Path) -> Prepared:
-        progress.start(path.name)
-        return prepare_document(
+        started = progress.start(path.name)
+        prepared = prepare_document(
             path, config, client, state, source_root=config.source_dir, cache=cache
         )
+        progress.finish(path.name, started)
+        return prepared
 
     def failed(path: Path, exc: Exception) -> Prepared:
         return _nothing_to_file(
@@ -290,9 +293,15 @@ def ingest(
         # Writing stays on the calling thread - unique filenames, the dedupe
         # index and the cache file are all shared - but it happens as soon as
         # that document is ready, not after every document has been read.
-        return file_document(prepared, config, vault, state, dry_run)
+        result = file_document(prepared, config, vault, state, dry_run)
+        if on_result is not None:
+            # Report it now rather than at the end, so what you watch is the
+            # run rather than a summary of it.
+            on_result(result)
+        return result
 
     report.results.extend(run_pipeline(paths, prepare, file, workers, on_error=failed))
+    log.info("%s", progress.summary(workers))
     if state is not None and not dry_run:
         state.save()
     if own_cache and cache is not None:

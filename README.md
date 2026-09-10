@@ -380,6 +380,23 @@ others, so the first note appears seconds after you start rather than after the
 last document has been classified, and a run that dies half way has half its
 work on disk.
 
+You can see it happening, and check it: each document is reported as it is
+filed rather than in a batch at the end, each line carries how long that
+document took, and the run ends with what actually overlapped.
+
+```
+INFO [5/22] classifying BRW…_000135.pdf
+INFO [2/22] done BRW…_000130.pdf in 6.4s
+filed: BRW…_000130.pdf -> Archive/Government/2026/2026-09-10 Electoral registration.md
+
+INFO 22 documents in 41s (7.1s each, 3.8 at a time with 4 workers)
+```
+
+"3.8 at a time with 4 workers" is the number that matters. If it says 1.0, the
+requests are being queued rather than run — almost always ollama, which
+serialises anything past `OLLAMA_NUM_PARALLEL`. `scanvault doctor` measures that
+directly: it times one request against several and tells you which it is.
+
 The write step stays on one thread. Unique filenames, the dedupe index and the
 cache file are shared state, and writing a note is milliseconds against seconds
 of model time, so serialising it costs nothing measurable and removes a whole

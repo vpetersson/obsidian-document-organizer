@@ -455,7 +455,7 @@ def apply(
         if action.kind not in ("noop", "index", "skipped", "duplicate", "failed")
     ]
     log.info("applying %d changes", len(todo))
-    progress = Progress(len(todo))
+    progress = Progress(len(todo), verb="reading")
 
     # Adopting a document and OCR'ing one both mean OCR plus a model call;
     # relocating and rewriting are file moves. Only the first kind is worth
@@ -465,9 +465,9 @@ def apply(
     fast = [action for action in todo if action not in slow]
 
     def read(action: Action) -> Prepared | None:
-        progress.start(f"{action.kind} {action.path.name}")
+        started = progress.start(f"{action.kind} {action.path.name}")
         if action.kind == "adopt":
-            return prepare_document(
+            prepared = prepare_document(
                 action.path,
                 config,
                 client,
@@ -476,7 +476,10 @@ def apply(
                 source_root=vault.root,
                 cache=cache,
             )
+            progress.finish(action.path.name, started)
+            return prepared
         _run_ocr(vault, action, config, client, cache)
+        progress.finish(action.path.name, started)
         return None
 
     def unreadable(action: Action, exc: Exception) -> Prepared | None:
@@ -492,6 +495,8 @@ def apply(
         progress.start(f"{action.kind} {action.path.name}")
         write(action, None)
     run_pipeline(slow, read, write, workers, on_error=unreadable)
+    if slow:
+        log.info("%s", progress.summary(workers))
 
     if state is not None:
         state.save()

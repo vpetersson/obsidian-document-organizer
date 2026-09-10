@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable, Sequence, TypeVar
 
@@ -109,15 +110,52 @@ def _run_one(
 
 
 class Progress:
-    """A counter several workers can log through without interleaving badly."""
+    """A counter several workers log through, and the evidence that they did.
 
-    def __init__(self, total: int):
+    Wall-clock against the summed time of the individual documents is the only
+    honest answer to "is this actually running in parallel?" - the order of the
+    log lines is not, because work is submitted in order whatever happens next.
+    """
+
+    def __init__(self, total: int, verb: str = "classifying"):
         self.total = total
-        self.done = 0
+        self.verb = verb
+        self.started_count = 0
+        self.finished = 0
+        self.worked_seconds = 0.0
+        self.started_at = time.monotonic()
         self._lock = threading.Lock()
 
-    def start(self, label: str) -> None:
+    def start(self, label: str) -> float:
         with self._lock:
-            self.done += 1
-            position = self.done
-        log.info("[%d/%d] classifying %s", position, self.total, label)
+            self.started_count += 1
+            position = self.started_count
+        log.info("[%d/%d] %s %s", position, self.total, self.verb, label)
+        return time.monotonic()
+
+    def finish(self, label: str, started: float) -> None:
+        elapsed = time.monotonic() - started
+        with self._lock:
+            self.finished += 1
+            self.worked_seconds += elapsed
+            position = self.finished
+        log.info("[%d/%d] done %s in %.1fs", position, self.total, label, elapsed)
+
+    @property
+    def elapsed(self) -> float:
+        return time.monotonic() - self.started_at
+
+    @property
+    def concurrency(self) -> float:
+        """Documents actually in flight at once, on average."""
+        return self.worked_seconds / self.elapsed if self.elapsed > 0 else 0.0
+
+    def summary(self, workers: int) -> str:
+        if not self.finished:
+            return "nothing to do"
+        average = self.worked_seconds / self.finished
+        return (
+            f"{self.finished} documents in {self.elapsed:.0f}s "
+            f"({average:.1f}s each, {self.concurrency:.1f} at a time "
+            f"with {workers} worker{'' if workers == 1 else 's'})"
+        )
