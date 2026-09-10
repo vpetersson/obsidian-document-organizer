@@ -77,11 +77,40 @@ class TestWorkerPool(unittest.TestCase):
         self.assertEqual(resolve_workers(4), 4)
         self.assertEqual(resolve_workers(1000), MAX_WORKERS)
 
-    def test_progress_counts_once_per_item(self):
+    def test_progress_counts_and_times_each_item(self):
         progress = Progress(3)
         for name in ("a", "b", "c"):
-            progress.start(name)
-        self.assertEqual(progress.done, 3)
+            started = progress.start(name)
+            time.sleep(0.01)
+            progress.finish(name, started)
+        self.assertEqual(progress.finished, 3)
+        self.assertGreater(progress.worked_seconds, 0.02)
+        self.assertIn("3 documents", progress.summary(2))
+
+    def test_progress_measures_how_much_actually_overlapped(self):
+        progress = Progress(4)
+
+        def work(index: int) -> int:
+            started = progress.start(str(index))
+            time.sleep(0.1)
+            progress.finish(str(index), started)
+            return index
+
+        parallel_map(work, range(4), workers=4)
+        # Four documents of 100ms each, done in about 100ms of wall clock.
+        self.assertGreater(progress.concurrency, 2.0, progress.summary(4))
+
+    def test_one_worker_reports_no_overlap(self):
+        progress = Progress(3)
+
+        def work(index: int) -> int:
+            started = progress.start(str(index))
+            time.sleep(0.05)
+            progress.finish(str(index), started)
+            return index
+
+        parallel_map(work, range(3), workers=1)
+        self.assertLess(progress.concurrency, 1.5, progress.summary(1))
 
     def test_the_cache_survives_being_shared(self):
         with tempfile.TemporaryDirectory() as tmp:

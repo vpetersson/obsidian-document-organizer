@@ -6,6 +6,7 @@ import argparse
 import logging
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from . import __version__
@@ -21,7 +22,7 @@ from .llm import LlmError, OllamaClient, is_local_host
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
 from .evaluate import evaluate, load_corpus
-from .parallel import resolve_workers
+from .parallel import parallel_map, resolve_workers
 from .pipeline import ingest, iter_documents, watch
 from .vault import Vault
 
@@ -173,6 +174,16 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print(f"No documents found in {config.source_dir}")
         return 0
     preview = is_preview(args)
+
+    def report_one(result) -> None:
+        if result.status == "ingested":
+            note = result.note.relative_to(config.vault_dir) if result.note else "?"
+            print(f"{'would file' if preview else 'filed'}: {result.source.name} -> {note}", flush=True)
+        elif result.status == "duplicate":
+            print(f"skipped (already filed): {result.source.name}", flush=True)
+        else:
+            print(f"FAILED: {result.source.name}: {result.error}", file=sys.stderr, flush=True)
+
     report = ingest(
         config,
         paths,
@@ -180,16 +191,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         dry_run=preview,
         use_state=not args.no_state,
         use_cache=not args.no_cache,
+        on_result=report_one,
     )
-
-    for result in report.results:
-        if result.status == "ingested":
-            note = result.note.relative_to(config.vault_dir) if result.note else "?"
-            print(f"{'would file' if preview else 'filed'}: {result.source.name} -> {note}")
-        elif result.status == "duplicate":
-            print(f"skipped (already filed): {result.source.name}")
-        else:
-            print(f"FAILED: {result.source.name}: {result.error}", file=sys.stderr)
     filed = f"{report.count('ingested')} {'to file' if preview else 'filed'}"
     print(f"\n{filed}, {report.count('duplicate')} duplicates, {report.count('failed')} failed")
     print_preview_trailer(preview)
@@ -385,6 +388,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                     'Return exactly {"ok": true} and nothing else.',
                 )
                 print(f"              {'OK' if reply.get('ok') else f'unexpected reply: {reply}'}")
+                _report_concurrency(client, resolve_workers(config.llm.workers))
             except LlmError as exc:
                 print(f"              FAILED: {exc}")
     except LlmError as exc:
@@ -395,6 +399,51 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if config.source_dir:
         print(f"source      : {config.source_dir} {'(exists)' if config.source_dir.exists() else '(MISSING)'}")
     return 0
+
+
+def _report_concurrency(client: OllamaClient, workers: int) -> None:
+    """Ask the model server whether it really answers more than one at a time.
+
+    This is the question behind "why is it still sequential?" - scanvault can
+    send four requests at once, but ollama queues anything past
+    OLLAMA_NUM_PARALLEL, and from the outside that looks identical to code that
+    never fanned out.
+    """
+    if workers < 2:
+        return
+    prompt = 'Return exactly {"ok": true} and nothing else.'
+    system = "You reply with JSON and nothing else."
+
+    def ask(_: int) -> None:
+        client.chat_json(system, prompt)
+
+    print(f"concurrency : timing {workers} requests against one...", flush=True)
+    try:
+        started = time.monotonic()
+        ask(0)
+        alone = time.monotonic() - started
+
+        started = time.monotonic()
+        parallel_map(ask, range(workers), workers)
+        together = time.monotonic() - started
+    except LlmError as exc:
+        print(f"              could not measure: {exc}")
+        return
+
+    if alone <= 0:
+        return
+    ratio = together / alone
+    if ratio < workers * 0.6:
+        print(
+            f"              {workers} at once took {ratio:.1f}x a single request "
+            f"- your ollama is answering them in parallel"
+        )
+    else:
+        print(
+            f"              {workers} at once took {ratio:.1f}x a single request "
+            f"- they are being queued, not run in parallel"
+        )
+        print(f"              try: OLLAMA_NUM_PARALLEL={workers} ollama serve")
 
 
 def cmd_init_config(args: argparse.Namespace) -> int:
