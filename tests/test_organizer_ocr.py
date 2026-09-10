@@ -10,7 +10,7 @@ from pathlib import Path
 from scanvault.config import load_config
 from scanvault.extract import pdf_text
 from scanvault.organizer import apply as organizer_apply
-from scanvault.organizer import attachment_needs_ocr, plan
+from scanvault.organizer import documents_need_ocr, plan
 from scanvault.vault import Vault, parse_frontmatter
 from tests.helpers import StubClient, make_scanned_pdf, make_text_pdf
 
@@ -50,8 +50,10 @@ class TestOrganizerOcr(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_detects_an_image_only_attachment(self):
-        frontmatter, _ = parse_frontmatter(self.note.read_text())
-        self.assertTrue(attachment_needs_ocr(Vault(self.config), frontmatter, self.config))
+        frontmatter, body = parse_frontmatter(self.note.read_text())
+        self.assertTrue(
+            documents_need_ocr(Vault(self.config), self.note, frontmatter, body, self.config)
+        )
 
     def test_plan_reports_it_instead_of_calling_the_note_filed(self):
         report = plan(self.config, client=None)

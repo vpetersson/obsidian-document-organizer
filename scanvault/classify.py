@@ -18,6 +18,7 @@ from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
 from .util import (
     clean_document_name,
+    clean_title,
     date_from_filename,
     file_created_date,
     fold,
@@ -425,7 +426,7 @@ def from_response(
         if isinstance(item, str) and item.strip()
     ]
     meta = DocumentMeta(
-        title=re.sub(r"\s{2,}", " ", title)[:120],
+        title=clean_title(title),
         category=category,
         summary=str(data.get("summary") or "").strip(),
         document_date=parse_date(data.get("document_date")),
@@ -464,7 +465,9 @@ def resolve_date(
     use_text = "text" in config.dates.fallbacks and bool(text.strip())
 
     if meta.document_date and plausible_date(meta.document_date):
-        meta.date_source = "document"
+        # The heuristic classifier records where it read the date; only a date
+        # the model reported arrives here unattributed.
+        meta.date_source = meta.date_source or "document"
         # The model reads the whole document, so it is usually right. But a
         # date it invented appears nowhere in the text, and when the text has
         # one under "Fakturadatum" that is the better answer.
@@ -551,13 +554,18 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         "",
     )
     first_line = titled or (lines[0] if lines else "")
-    title = (first_line[:80] or fallback_title).strip()
-    title_source = "text" if first_line else "filename"
+    # A line of a note body can be an embed rather than a sentence; a title made
+    # out of "![[Scan Page 196.jpg]]" is a filename with brackets in it.
+    from_text = clean_title(first_line, 80)
+    title = from_text or clean_title(fallback_title)
+    title_source = "text" if from_text else "filename"
     meta = DocumentMeta(
         title=title,
         category=category,
         summary="",
         document_date=(date_from_text(text, config.dates.day_first) or (None, ""))[0],
+        # Read out of the text here, not reported by a model.
+        date_source="text",
         confidence=0.2,
         classifier="heuristic",
         title_source=title_source,

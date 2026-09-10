@@ -222,7 +222,13 @@ class Vault:
         text: str,
         attachment: Path | None,
         extra: dict[str, Any] | None = None,
+        embeds: list[Path] | None = None,
     ) -> str:
+        """Render a note. `embeds` are files the note already pointed at.
+
+        Rewriting a note replaces its body, so anything it embedded has to be
+        put back or the scans it was written to hold are orphaned.
+        """
         frontmatter: dict[str, Any] = {
             "title": meta.title,
             "date": meta.document_date,  # emitted unquoted so Obsidian sees a date
@@ -253,6 +259,12 @@ class Vault:
             body += [meta.summary, ""]
         if attachment is not None:
             body += [f"![[{self.wikilink(attachment)}]]", ""]
+        for embed in embeds or []:
+            if attachment is not None and embed == attachment:
+                continue
+            # Written as a vault-relative link rather than the bare name the
+            # note used, so it survives the note being moved.
+            body += [f"![[{self.wikilink(embed)}]]", ""]
         if self.config.vault.include_text and text.strip():
             clipped = text.strip()[: self.config.vault.max_text_chars]
             body += extracted_text_block(clipped, self.config.vault.extracted_text_style)
@@ -358,6 +370,44 @@ class Vault:
             if any(part.startswith(".") for part in path.relative_to(self.root).parts):
                 continue
             yield path
+
+    def resolve_link(self, note: Path, target: str) -> Path | None:
+        """The file a link points at, the way Obsidian resolves one.
+
+        Obsidian's default is a "shortest path" link: `![[Scan Page 196.jpg]]`
+        carries no folder and is resolved by searching the vault. So a bare name
+        is looked for beside the note first, then anywhere in the vault, before
+        being given up on.
+        """
+        target = unquote(target.strip())
+        if not target or target.startswith(("http://", "https://", "obsidian://")):
+            return None
+        candidates = [note.parent / target, self.root / target]
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        if "/" in target:
+            return None
+        name = Path(target).name
+        matches = [
+            path
+            for path in self.root.rglob(name)
+            if path.is_file() and not any(part.startswith(".") for part in path.parts)
+        ]
+        # Ambiguous is as good as missing: acting on the wrong file is worse
+        # than leaving the note alone.
+        return matches[0] if len(matches) == 1 else None
+
+    def linked_documents(self, note: Path, body: str) -> list[Path]:
+        """The PDFs and images a note embeds, in the order it embeds them."""
+        found: list[Path] = []
+        for target in link_targets(body):
+            if Path(unquote(target.strip())).suffix.lower() not in DOCUMENT_SUFFIXES:
+                continue
+            path = self.resolve_link(note, target)
+            if path is not None and path not in found:
+                found.append(path)
+        return found
 
     def _record_link(self, target: str, paths: set[Path], names: set[str]) -> None:
         target = unquote(target.strip())

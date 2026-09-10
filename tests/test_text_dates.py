@@ -70,6 +70,12 @@ class TestFormats(unittest.TestCase):
         # 13 is not a month either way round.
         self.assertEqual(read("Date: 13/04/2024", day_first=False), date(2024, 4, 13))
 
+    def test_a_label_with_spaces_around_its_colon(self):
+        """As printed on a passport-style document, reported from a real scan."""
+        self.assertEqual(
+            read("Date Of Issue : 1 April 2026 GREENWICH"), date(2026, 4, 1)
+        )
+
     def test_a_month_and_a_year_dates_a_statement_to_the_first(self):
         self.assertEqual(read("Statement date May 2024"), date(2024, 5, 1))
 
