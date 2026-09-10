@@ -164,18 +164,61 @@ scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
 `ingest` is safe to re-run: every filed document is recorded by SHA-256 in
 `<vault>/.scanvault/index.json`, so the same scan is never filed twice.
 
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `ingest` | file new scans from a source folder into the vault |
+| `watch` | the same, polling the source folder |
+| `organize` | OCR, reclassify and re-file documents already in the vault |
+| `ocr` | phase 1 only: turn scans into searchable PDFs and dump their text |
+| `init-vault` | create the folder documents are filed into |
+| `init-config` | write a starting `scanvault.toml` |
+| `doctor` | check the OCR toolchain, the model, and whether requests really run in parallel |
+| `eval` | score the classifier against a labelled corpus |
+
+Every command that writes takes `--apply` and `--dry-run`; `-v`/`--verbose` and
+`-q`/`--quiet` work before or after the subcommand. Beyond that:
+
+| Flag | On | Meaning |
+| --- | --- | --- |
+| `--source`, `--vault` | ingest, watch | folders to read from and write to |
+| `--workers N` | ingest, watch, organize, eval | documents in flight at once |
+| `--model`, `--ollama-host` | all of the above | which model, and where it runs |
+| `--no-llm` | all of the above | skip the model, use rules and heuristics |
+| `--lang eng+swe` | ingest, watch, ocr | OCR languages, main one first |
+| `--force-ocr` | ingest, watch, ocr | OCR even when a text layer exists |
+| `--keep-source` | ingest, watch | copy the original instead of moving it |
+| `--no-recursive` | ingest | do not descend into subfolders |
+| `--no-state` | ingest | ignore the dedupe index |
+| `--no-cache` | ingest, organize | ask the model again instead of reusing answers |
+| `--reclassify` | organize | re-run the model over every note |
+| `--no-adopt` | organize | ignore PDFs no note points at |
+| `--no-ocr` | organize | skip the OCR pass |
+| `--include-unmanaged` | organize | also file notes scanvault did not write |
+| `--out`, `--text-out` | ocr | where to put searchable PDFs and extracted text |
+| `--interval`, `--iterations` | watch | how often to poll, and how many times |
+| `--corpus` | eval | a labelled corpus of your own |
+| `--output`, `--force` | init-config | where to write, and overwrite if it exists |
+
 ## What lands in the vault
 
 ```
-Archive/
-├── Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.md
-├── _attachments/Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf
-└── .scanvault/index.json
+your-vault/
+├── Archive/
+│   ├── Archive.md                                                    <- what this folder is
+│   ├── Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.md
+│   └── _attachments/
+│       └── Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf
+└── .scanvault/
+    ├── index.json              <- SHA-256 of everything filed, so re-runs skip it
+    ├── classifications.json    <- the model's answers, so a preview is not paid for twice
+    └── work/                   <- temporary OCR output
 ```
 
 ```markdown
 ---
-title: "Acme Invoice INV-1234"
+title: "Invoice INV-1234"
 date: 2024-05-02
 date_source: "document"
 title_source: "model"
@@ -186,27 +229,32 @@ tags:
   - invoices
   - year-2024
   - acme-ltd
-  - acme
+  - invoice
+document_type: "commercial invoice"
+context: "business"
 subjects:
-  - "Account 4242"
+  - Account 4242
 reference: "INV-1234"
 amount: "120.00"
 currency: "EUR"
+language: "English"
 confidence: 0.95
 para: "archive"
 classifier: "llm"
+scanvault_version: "0.16.0"
+processed: "2026-09-10T09:02:23Z"
 source_file: "scan_001.pdf"
 source_hash: "9f2c…"
 ocr: "ocrmypdf"
 pages: 2
-attachment: "Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf"
+attachment: "Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf"
 ---
 
-# Acme Invoice INV-1234
+# Invoice INV-1234
 
-Invoice INV-1234 from Acme Ltd for 120.00 EUR.
+Invoice INV-1234 from Acme Ltd for 120.00 EUR, due within 30 days.
 
-![[Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice INV-1234.pdf]]
+![[Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf]]
 
 > [!quote]- Extracted text
 > ```text
@@ -244,7 +292,7 @@ scanvault organize --vault ~/Obsidian/Archive
 [dry-run] duplicate: Work receipts/scan-2017-03-05 - 1.pdf (same content as Archive/Receipts/2017/2017-03-05 Coffee House.md)
 
 1 to OCR, 1 to relocate, 0 to rewrite, 1 to adopt (1 of them need OCR), 12 already filed, 1 duplicates, 3 left alone, 0 failed
-3 notes were left alone because scanvault did not write them; pass --include-unmanaged to file those too, or -v to list them.
+3 notes were left alone because they were not written by scanvault; pass --include-unmanaged to file those too, or -v to list them.
 Nothing was changed. Re-run with --apply to execute.
 ```
 
@@ -635,7 +683,7 @@ else changed, and `--dry-run` still means what it always did.
 ### Migrating a vault from 0.1
 
 0.1 filed everything under `Documents/` and `Attachments/`. To move an existing
-vault into the PARA layout:
+vault into the current layout:
 
 ```bash
 scanvault organize --vault ~/Obsidian/Archive          # preview, shows every move
@@ -677,8 +725,6 @@ fallback_to_heuristics = true      # keep filing when ollama is down
 fallbacks = ["filename", "pdf-metadata", "file-created"]
 
 [vault]
-notes_dir = ""                     # the PARA folders live at the vault root
-attachments_dir = ""
 layout = "flat"                    # flat | para
 documents_dir = "Archive"          # the folder documents live in ("" = vault root)
 note_path_template = "{root}/{category}/{year}/{date} {name}"
