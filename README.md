@@ -172,7 +172,7 @@ scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
 | `watch` | the same, polling the source folder |
 | `organize` | OCR, reclassify and re-file documents already in the vault |
 | `ocr` | phase 1 only: turn scans into searchable PDFs and dump their text |
-| `init-vault` | create the folder documents are filed into |
+| `init-vault` | create the folder documents are filed into, and the CSS snippet |
 | `init-config` | write a starting `scanvault.toml` |
 | `doctor` | check the OCR toolchain, the model, and whether requests really run in parallel |
 | `eval` | score the classifier against a labelled corpus |
@@ -210,6 +210,8 @@ your-vault/
 │   ├── Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.md
 │   └── _attachments/
 │       └── Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf
+├── .obsidian/
+│   └── snippets/scanvault.css   <- folds the properties panel away
 └── .scanvault/
     ├── index.json              <- SHA-256 of everything filed, so re-runs skip it
     ├── classifications.json    <- the model's answers, so a preview is not paid for twice
@@ -241,13 +243,15 @@ language: "English"
 confidence: 0.95
 para: "archive"
 classifier: "llm"
-scanvault_version: "0.18.0"
+scanvault_version: "0.19.0"
 processed: "2026-09-10T09:02:23Z"
 source_file: "scan_001.pdf"
 source_hash: "9f2c…"
 ocr: "ocrmypdf"
 pages: 2
 attachment: "Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf"
+cssclasses:
+  - scanvault
 ---
 
 # Invoice INV-1234
@@ -274,6 +278,46 @@ still finds it. `[vault] extracted_text_style` takes `callout` (the default),
 Notes written before this pick up the new shape on the next
 `organize --apply`, which reports them as `extracted text is plain, not callout`
 and rewrites them around the text they already hold.
+
+### Folding the properties away
+
+The frontmatter above is for machines: which classifier ran, where the date came
+from, the hash that stops the document being filed twice. Obsidian renders all
+of it as a Properties panel above every note, so a scanned letter opens on a
+screen of bookkeeping before the letter.
+
+Obsidian's own setting for this — Settings → Editor → *Properties in document* →
+`Hidden` — is global, and hides them in your hand-written notes too. So each
+note scanvault writes carries a `cssclasses` value instead, and `init-vault`
+writes a snippet that folds the panel shut on those notes only:
+
+```
+<vault>/.obsidian/snippets/scanvault.css
+```
+
+Turn it on once, in Settings → Appearance → *CSS snippets*. The "Properties"
+header stays where it is; hovering or focusing it brings the rest back. The file
+is yours from the moment it exists — scanvault never overwrites it — and it
+carries a commented alternative that hides the panel outright rather than
+folding it. The selectors describe Obsidian's own markup, which Obsidian is free
+to change, so treat it as a starting point rather than something scanvault keeps
+in step.
+
+`scanvault doctor` reports which of the three states you are in, because a
+snippet that was written but never switched on looks exactly like CSS that does
+not work:
+
+```
+properties  : folded away by scanvault.css
+properties  : scanvault.css written but NOT enabled - Settings -> Appearance -> CSS snippets
+properties  : shown in full (run init-vault --apply to write the CSS snippet)
+```
+
+Set `cssclasses = []` under `[vault]` to write no class and no snippet, or name
+your own classes there if you would rather style the notes yourself. Existing
+notes pick the class up on the next `organize --apply`, reported as
+`rewrite: … (missing cssclasses)` so you see the count before it happens; a
+class you added by hand is kept alongside it.
 
 ## Organizing an existing vault
 
@@ -307,7 +351,7 @@ What each action means:
 | --- | --- |
 | `ocr` | Nothing the note points at can be read. Runs OCR, **replaces a PDF attachment with the searchable version**, refreshes the note's extracted text and records the backend in `ocr:`. If the note's metadata was thin, it is classified from the fresh text and refiled. |
 | `relocate` | Moves the note and its PDF to where the templates say they belong. |
-| `rewrite` | Keeps the location, refreshes frontmatter from a new classification. |
+| `rewrite` | Keeps the location, refreshes frontmatter from a new classification, or adds a `cssclasses` value the note predates. Anything you wrote in the note — prose, embeds — is carried across. |
 | `adopt` | A PDF in the vault that no note points at: OCR'd, classified and given a note. The plan says which of them have no text layer. |
 | `duplicate` | Byte-identical to a document already filed. Reported, never filed twice and never deleted. |
 | `already filed` | Nothing to do. |
@@ -779,8 +823,8 @@ num_ctx = 8192
 fallback_to_heuristics = true      # keep filing when ollama is down
 
 [dates]
-# Used only when the document's own text carries no date.
-fallbacks = ["filename", "pdf-metadata", "file-created"]
+# "text" reads the date off the document; the rest are guesses about the file.
+fallbacks = ["text", "filename", "pdf-metadata", "file-created"]
 
 [vault]
 layout = "flat"                    # flat | para
@@ -790,6 +834,8 @@ attachment_path_template = "{root}/_attachments/{category}/{year}/{date} {name}"
 source_action = "move"             # move | copy | leave
 keep_original_image = true         # keep the photo an image document came from
 include_text = true
+extracted_text_style = "callout"   # callout | details | plain
+cssclasses = ["scanvault"]         # the class the properties snippet targets ([] = none)
 tag_source_folder = true           # turn the folder a document came from into tags
 
 [vault.para]

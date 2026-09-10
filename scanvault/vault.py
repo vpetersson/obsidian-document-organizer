@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
@@ -18,6 +19,44 @@ from .extract import DOCUMENT_SUFFIXES
 from .util import parse_date, safe_filename, unique_path
 
 log = logging.getLogger(__name__)
+
+CSS_SNIPPET_NAME = "scanvault"
+
+
+def css_snippet(classes: list[str]) -> str:
+    """The CSS that folds the properties panel shut on scanvault's notes.
+
+    The selectors describe Obsidian's DOM, which is Obsidian's to change - this
+    is a starting point to edit, not something scanvault keeps in step.
+    """
+    container = ", ".join(f".{name} .metadata-container" for name in classes)
+    collapsed = ", ".join(f".{name} .metadata-container .metadata-properties" for name in classes)
+    expanded = ",\n".join(
+        f".{name} .metadata-container:hover .metadata-properties,\n"
+        f".{name} .metadata-container:focus-within .metadata-properties"
+        for name in classes
+    )
+    return f"""/* Written by `scanvault init-vault`. Yours to edit; never overwritten.
+
+   Frontmatter on a filed document is bookkeeping - which classifier ran, where
+   the date came from, the hash that stops it being filed twice. Obsidian shows
+   all of it above every note. This folds it shut on the notes scanvault wrote,
+   leaving the "Properties" header there to hover or focus for the rest.
+
+   To hide it outright instead, replace both rules with:
+       {container} {{ display: none; }}
+
+   Enable this in Settings -> Appearance -> CSS snippets. */
+
+{collapsed} {{
+  display: none;
+}}
+
+{expanded} {{
+  display: block;
+}}
+"""
+
 
 FRONTMATTER_RE = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 # `![[file.pdf]]`, `[[folder/file.pdf|label]]` and `[label](folder/file.pdf)`
@@ -223,11 +262,14 @@ class Vault:
         attachment: Path | None,
         extra: dict[str, Any] | None = None,
         embeds: list[Path] | None = None,
+        prose: str = "",
     ) -> str:
-        """Render a note. `embeds` are files the note already pointed at.
+        """Render a note.
 
-        Rewriting a note replaces its body, so anything it embedded has to be
-        put back or the scans it was written to hold are orphaned.
+        Rewriting a note replaces its body, so anything that was not ours has to
+        be put back: `embeds` are files it pointed at, `prose` is whatever
+        someone wrote in it. Losing either would make re-filing a vault a way to
+        destroy what is in it.
         """
         frontmatter: dict[str, Any] = {
             "title": meta.title,
@@ -249,14 +291,28 @@ class Vault:
             "classifier": meta.classifier,
             "scanvault_version": __version__,
             "processed": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            # Obsidian turns these into CSS classes on the note, which is what
+            # lets a snippet fold this whole block away. Last, so the panel
+            # ends with the least interesting line rather than starting on it.
+            "cssclasses": list(self.config.vault.cssclasses),
         }
-        frontmatter.update(extra or {})
+        frontmatter.pop("cssclasses")
+        extra = dict(extra or {})
+        # A caller that knows the note's existing classes hands them over here;
+        # they are the user's, and adding ours must not drop theirs.
+        classes = extra.pop("cssclasses", None) or list(self.config.vault.cssclasses)
+        frontmatter.update(extra)
         if attachment is not None:
             frontmatter["attachment"] = self.wikilink(attachment)
+        # Last, after the extras, so the panel ends on the line worth reading
+        # least rather than opening on it.
+        frontmatter["cssclasses"] = classes
 
         body = [dump_frontmatter(frontmatter), "", f"# {meta.title}", ""]
         if meta.summary:
             body += [meta.summary, ""]
+        if prose.strip():
+            body += [prose.strip(), ""]
         if attachment is not None:
             body += [f"![[{self.wikilink(attachment)}]]", ""]
         for embed in embeds or []:
@@ -324,6 +380,40 @@ class Vault:
         note.parent.mkdir(parents=True, exist_ok=True)
         note.write_text(self.render_note(meta, text, attachment, extra), encoding="utf-8")
         return WriteResult(note, attachment)
+
+    def write_css_snippet(self, dry_run: bool = False) -> Path | None:
+        """Write the snippet that folds the properties panel away.
+
+        Frontmatter is bookkeeping - which classifier ran, where the date came
+        from, the hash. Obsidian shows all of it above every note, which for a
+        scanned letter is a screen of machine-readable detail before the letter.
+        Obsidian's own setting for this (Editor -> Properties in document) is
+        global, so this targets our notes only, through `cssclasses`.
+
+        Never overwrites: the file is the user's once it exists.
+        """
+        classes = self.config.vault.cssclasses
+        if not classes:
+            return None
+        path = self.root / ".obsidian" / "snippets" / f"{CSS_SNIPPET_NAME}.css"
+        if path.exists():
+            return None
+        if not dry_run:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(css_snippet(classes), encoding="utf-8")
+        return path
+
+    def snippet_enabled(self) -> bool | None:
+        """Whether Obsidian has the snippet switched on. None if it cannot tell."""
+        appearance = self.root / ".obsidian" / "appearance.json"
+        try:
+            data = json.loads(appearance.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        enabled = data.get("enabledCssSnippets")
+        if not isinstance(enabled, list):
+            return None
+        return CSS_SNIPPET_NAME in enabled
 
     def scaffold(self, dry_run: bool = False) -> list[Path]:
         """Create the folders documents will land in. Never overwrites."""

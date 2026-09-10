@@ -87,13 +87,72 @@ class TestOrganizer(unittest.TestCase):
         note = self.write_note(
             "Contracts/2023/2023-01-15 Rental Agreement.md",
             '---\ntitle: "Rental Agreement"\ndate: 2023-01-15\ncategory: "Contracts"\n'
-            'tags:\n  - scan\nclassifier: "llm"\n---\n\nbody\n',
+            'tags:\n  - scan\nclassifier: "llm"\ncssclasses:\n  - scanvault\n---\n\nbody\n',
         )
         before = note.read_text()
         report = plan(self.config, client=None)
         organizer_apply(report, self.config, client=None)
         self.assertEqual(report.count("noop"), 1)
         self.assertEqual(note.read_text(), before)
+
+    def test_a_note_from_before_cssclasses_is_rewritten_to_gain_it(self):
+        """Otherwise the properties snippet only ever applies to new documents."""
+        note = self.write_note(
+            "Contracts/2023/2023-01-15 Rental Agreement.md",
+            '---\ntitle: "Rental Agreement"\ndate: 2023-01-15\ncategory: "Contracts"\n'
+            'tags:\n  - scan\nclassifier: "llm"\n---\n\nbody\n',
+        )
+        report = plan(self.config, client=None)
+        self.assertEqual([a.reason for a in report.actions if a.kind == "rewrite"],
+                         ["missing cssclasses"])
+        organizer_apply(report, self.config, client=None)
+        self.assertIn("cssclasses:\n  - scanvault", note.read_text())
+
+    def test_nothing_drifts_when_no_classes_are_configured(self):
+        self.config.vault.cssclasses = []
+        self.write_note(
+            "Contracts/2023/2023-01-15 Rental Agreement.md",
+            '---\ntitle: "Rental Agreement"\ndate: 2023-01-15\ncategory: "Contracts"\n'
+            'tags:\n  - scan\nclassifier: "llm"\n---\n\nbody\n',
+        )
+        self.assertEqual(plan(self.config, client=None).count("noop"), 1)
+
+    def test_prose_someone_wrote_survives_a_rewrite(self):
+        """Re-filing a vault must not be a way to destroy what is in it."""
+        note = self.write_note(
+            "Contracts/2023/2023-01-15 Rental Agreement.md",
+            '---\ntitle: "Rental Agreement"\ndate: 2023-01-15\ncategory: "Contracts"\n'
+            'tags:\n  - scan\nclassifier: "llm"\n---\n\n# Rental Agreement\n\n'
+            "Renewal is due in March; ask about the parking space.\n\n"
+            "> [!quote]- Extracted text\n> ```text\n> TENANCY AGREEMENT\n> ```\n",
+        )
+        organizer_apply(plan(self.config, client=None), self.config, client=None)
+        body = note.read_text()
+        self.assertIn("ask about the parking space", body)
+        self.assertIn("TENANCY AGREEMENT", body)
+
+    def test_that_prose_is_not_duplicated_on_the_next_run(self):
+        note = self.write_note(
+            "Contracts/2023/2023-01-15 Rental Agreement.md",
+            '---\ntitle: "Rental Agreement"\ndate: 2023-01-15\ncategory: "Contracts"\n'
+            'tags:\n  - scan\nclassifier: "llm"\n---\n\n# Rental Agreement\n\n'
+            "Renewal is due in March.\n",
+        )
+        for _ in range(2):
+            organizer_apply(plan(self.config, client=None), self.config, client=None)
+        self.assertEqual(note.read_text().count("Renewal is due in March."), 1)
+
+    def test_a_class_added_by_hand_is_kept(self):
+        note = self.write_note(
+            "Contracts/2023/2023-01-15 Rental Agreement.md",
+            '---\ntitle: "Rental Agreement"\ndate: 2023-01-15\ncategory: "Contracts"\n'
+            'tags:\n  - scan\nclassifier: "llm"\ncssclasses:\n  - mine\n---\n\nbody\n',
+        )
+        report = plan(self.config, client=None)
+        organizer_apply(report, self.config, client=None)
+        body = note.read_text()
+        self.assertIn("- mine", body)
+        self.assertIn("- scanvault", body)
 
     @unittest.skipUnless(HAS_EXTRACTOR, "needs pypdf or pdftotext")
     def test_note_with_missing_metadata_is_reclassified_from_its_attachment(self):

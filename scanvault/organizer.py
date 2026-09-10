@@ -123,6 +123,28 @@ def strip_markup(body: str) -> str:
     return LINK_MARKUP_RE.sub(" ", without_headings).strip()
 
 
+def preserved_prose(body: str, summary: str = "") -> str:
+    """Whatever someone wrote in the note that scanvault did not put there.
+
+    Rewriting regenerates the body from the metadata, so a line a human added
+    under the scan would be gone by the next `organize --apply`. Everything
+    scanvault writes - the title heading, the summary, the embeds, the
+    extracted-text block - is removed, and what is left is theirs.
+    """
+    without_ours = CALLOUT_BLOCK_RE.sub("", body)
+    without_ours = TEXT_BLOCK_RE.sub("", without_ours)
+    without_ours = re.sub(r"<details>.*?</details>", "", without_ours, flags=re.DOTALL)
+    lines = [
+        line
+        for line in without_ours.splitlines()
+        if not line.startswith("#") and not LINK_MARKUP_RE.fullmatch(line.strip())
+    ]
+    text = "\n".join(lines).strip()
+    if summary.strip() and summary.strip() in text:
+        text = text.replace(summary.strip(), "", 1).strip()
+    return text
+
+
 def note_documents(
     vault: Vault, note: Path, frontmatter: dict[str, Any], body: str
 ) -> list[Path]:
@@ -184,6 +206,32 @@ def documents_need_ocr(
         if len(pdf_text(document)) < config.ocr.searchable_min_chars:
             return True
     return False
+
+
+def merged_cssclasses(frontmatter: dict[str, Any], config: Config) -> list[str]:
+    """The note's own classes, plus the configured ones it is missing."""
+    present = frontmatter.get("cssclasses")
+    if isinstance(present, str):
+        present = [present]
+    classes = [name for name in (present or []) if isinstance(name, str)]
+    for name in config.vault.cssclasses:
+        if name not in classes:
+            classes.append(name)
+    return classes
+
+
+def cssclasses_drifted(frontmatter: dict[str, Any], config: Config) -> bool:
+    """True when a note is missing a class the configured snippet needs.
+
+    Only ever adds: a class someone put there by hand is theirs to keep.
+    """
+    wanted = set(config.vault.cssclasses)
+    if not wanted:
+        return False
+    present = frontmatter.get("cssclasses")
+    if isinstance(present, str):
+        present = [present]
+    return not wanted.issubset(set(present or []))
 
 
 def resolve_bucket(vault: Vault, note: Path, frontmatter: dict[str, Any], config: Config) -> str:
@@ -346,6 +394,21 @@ def plan(
                     )
                 )
                 continue
+            if cssclasses_drifted(frontmatter, config):
+                # Same document, same place; it just predates the class the
+                # properties snippet targets.
+                report.actions.append(
+                    Action(
+                        "rewrite",
+                        note,
+                        note,
+                        "missing cssclasses",
+                        meta,
+                        frontmatter,
+                        embedded_text(body),
+                    )
+                )
+                continue
             report.actions.append(Action("noop", note, note, "already filed", meta))
             continue
         report.actions.append(Action("relocate", note, target, reason, meta, frontmatter, text))
@@ -490,6 +553,7 @@ def _rewrite_note(
         for key in ("source_file", "source_hash", "ocr", "pages", "created")
         if key in action.frontmatter
     }
+    preserved["cssclasses"] = merged_cssclasses(action.frontmatter, vault.config)
     _, body = vault.read_note(action.path)
     text = action.body_text
     if not text and vault.config.vault.include_text:
@@ -499,7 +563,14 @@ def _rewrite_note(
     embeds = [] if attachment is not None else vault.linked_documents(action.path, body)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
-        vault.render_note(meta, text, attachment, extra=preserved, embeds=embeds),
+        vault.render_note(
+            meta,
+            text,
+            attachment,
+            extra=preserved,
+            embeds=embeds,
+            prose=preserved_prose(body, meta.summary),
+        ),
         encoding="utf-8",
     )
 
