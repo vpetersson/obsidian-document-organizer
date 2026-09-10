@@ -27,7 +27,7 @@ SCAN_LINES = [
 NOTE = (
     '---\ntitle: "Acme Invoice"\ndate: 2024-05-02\ncategory: "Invoices"\n'
     'tags:\n  - scan\nclassifier: "llm"\n'
-    'attachment: "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf"\n'
+    'attachment: "Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf"\n'
     "---\n\n# Acme Invoice\n"
 )
 
@@ -39,10 +39,10 @@ class TestOrganizerOcr(unittest.TestCase):
         self.root = Path(self.tmp.name) / "vault"
         self.config = load_config(overrides={"vault_dir": str(self.root)})
         self.attachment = make_scanned_pdf(
-            self.root / "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf",
+            self.root / "Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf",
             SCAN_LINES,
         )
-        self.note = self.root / "4 Archive/Invoices/2024/2024-05-02 Acme Invoice.md"
+        self.note = self.root / "Archive/Invoices/2024/2024-05-02 Acme Invoice.md"
         self.note.parent.mkdir(parents=True, exist_ok=True)
         self.note.write_text(NOTE, encoding="utf-8")
 
@@ -82,11 +82,11 @@ class TestOrganizerOcr(unittest.TestCase):
     @unittest.skipUnless(HAS_BACKEND, "needs ocrmypdf or tesseract")
     def test_incomplete_note_is_classified_from_the_ocr_text_and_refiled(self):
         self.note.unlink()
-        note = self.root / "4 Archive/Unsorted/scan.md"
+        note = self.root / "Archive/Unsorted/scan.md"
         note.parent.mkdir(parents=True, exist_ok=True)
         note.write_text(
             '---\ntitle: "scan"\n'
-            'attachment: "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf"\n'
+            'attachment: "Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf"\n'
             "---\n",
             encoding="utf-8",
         )
@@ -102,7 +102,7 @@ class TestOrganizerOcr(unittest.TestCase):
         organizer_apply(report, self.config, client=client)
 
         self.assertIn("INVOICE", client.calls[0][1].upper(), "the model must see the OCR text")
-        moved = self.root / "4 Archive/Invoices/2024/2024-05-02 Acme Invoice INV-1234.md"
+        moved = self.root / "Archive/Invoices/2024/2024-05-02 Acme Invoice INV-1234.md"
         self.assertTrue(moved.is_file())
         self.assertFalse(note.exists())
         frontmatter, _ = parse_frontmatter(moved.read_text())
@@ -215,10 +215,10 @@ class TestLinkedPdfsAreNotLoose(unittest.TestCase):
         self.assertEqual(list(self.vault.iter_loose_documents()), [orphan])
 
     def test_frontmatter_attachments_still_count(self):
-        pdf = self.add_pdf("4 Archive/_attachments/x.pdf")
+        pdf = self.add_pdf("Archive/_attachments/x.pdf")
         self.add_note(
-            "4 Archive/x.md",
-            '---\ntitle: "x"\nattachment: "4 Archive/_attachments/x.pdf"\n---\n\nno body link\n',
+            "Archive/x.md",
+            '---\ntitle: "x"\nattachment: "Archive/_attachments/x.pdf"\n---\n\nno body link\n',
         )
         self.assertEqual(list(self.vault.iter_loose_documents()), [])
         self.assertTrue(pdf.is_file())
@@ -297,7 +297,7 @@ class TestShortDocumentsStayOcrd(unittest.TestCase):
             }
         )
         organizer_apply(plan(self.config, client=client), self.config, client=client)
-        attachment = next((self.root / "4 Archive/_attachments").rglob("*.pdf"))
+        attachment = next((self.root / "Archive/_attachments").rglob("*.pdf"))
         text = pdf_text(attachment)
         self.assertIn("COFFEE", text.upper())
         self.assertLess(len(text), 180, "the fixture must be shorter than min_text_chars")

@@ -83,8 +83,8 @@ class TestPipeline(unittest.TestCase):
         report = ingest(self.config, client=StubClient(LLM_RESPONSE))
         self.assertEqual(report.count("ingested"), 1)
 
-        note = self.vault_dir / "4 Archive/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice INV-1234.md"
-        attachment = self.vault_dir / "4 Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice INV-1234.pdf"
+        note = self.vault_dir / "Archive/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice INV-1234.md"
+        attachment = self.vault_dir / "Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Acme Invoice INV-1234.pdf"
         self.assertTrue(note.is_file())
         self.assertTrue(attachment.is_file())
         self.assertFalse(self.pdf.exists(), "the original should have been moved into the vault")
