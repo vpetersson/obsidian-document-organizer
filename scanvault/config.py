@@ -402,8 +402,6 @@ BUCKETS = ("project", "area", "resource", "archive")
 class VaultConfig:
     # The PARA folders sit at the vault root, so the templates carry the
     # full path from there.
-    notes_dir: str = ""
-    attachments_dir: str = ""
     para: ParaConfig = field(default_factory=ParaConfig)
     # "flat" puts every document under one folder, because scanned paper is all
     # reference material and PARA's other three folders stay empty. "para" keeps
@@ -450,11 +448,13 @@ class Config:
 
     @property
     def notes_root(self) -> Path:
-        return self._vault_subdir(self.vault.notes_dir)
+        # The path templates carry the folder, starting from `{root}`, so
+        # everything hangs directly off the vault.
+        return self._vault_subdir("")
 
     @property
     def attachments_root(self) -> Path:
-        return self._vault_subdir(self.vault.attachments_dir)
+        return self._vault_subdir("")
 
     @property
     def state_root(self) -> Path:
