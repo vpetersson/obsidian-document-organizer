@@ -255,7 +255,7 @@ def plan(
         progress.start(note.name)
         text = note_text(vault, note, frontmatter, body, config)
         meta = classify(text, config, client, source=note, cache=cache)
-        resolve_date(meta, attachment_path(vault, frontmatter) or note, config)
+        resolve_date(meta, attachment_path(vault, frontmatter) or note, config, text)
         return text, meta
 
     classified_by_note = dict(
@@ -403,7 +403,7 @@ def _run_ocr(
         shutil.move(str(result.pdf_path), pdf)
     if action.classify_after:
         action.meta = classify(result.text, config, client, source=action.path, cache=cache)
-        resolve_date(action.meta, pdf, config)
+        resolve_date(action.meta, pdf, config, result.text)
     else:
         action.meta = vault.meta_from_note(action.frontmatter, action.path.stem)
     action.meta.para = resolve_bucket(vault, action.path, action.frontmatter, config)

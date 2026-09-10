@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import re
-import unicodedata
 from difflib import SequenceMatcher
 from functools import lru_cache
 from dataclasses import dataclass, field
@@ -14,12 +13,14 @@ from typing import Any
 
 from .cache import ClassificationCache
 from .config import GENERIC_CATEGORIES, WEAK_TAGS, Config
+from .dates import date_from_text, find_dates, strong_date
 from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
 from .util import (
     clean_document_name,
     date_from_filename,
     file_created_date,
+    fold,
     parse_date,
     slugify,
     truncate_words,
@@ -109,7 +110,9 @@ def build_prompt(
         "Rules:",
         "- title: a short human title, no dates, no file extension (max 12 words).",
         "- document_date: the date the document itself carries (issue/statement/"
-        "letter date), as YYYY-MM-DD. Not today's date. Null if absent.",
+        "letter/invoice date), as YYYY-MM-DD. Not today's date, not the due "
+        "date, not the end of a coverage period, not a date of birth. Null if "
+        "the document carries no date of its own.",
         "- correspondent: the organisation or person the document is from.",
         "- context: \"business\" if the document belongs to a company - an "
         "organisation number, a VAT registration, a company name as the customer "
@@ -190,8 +193,8 @@ class DocumentMeta:
     currency: str = ""
     confidence: float | None = None
     classifier: str = "llm"  # "llm" | "heuristic"
-    # Where document_date came from: document | filename | pdf-metadata |
-    # file-created. Empty when the document is undated.
+    # Where document_date came from: document | text | filename | pdf-metadata
+    # | file-created. Empty when the document is undated.
     date_source: str = ""
     # Where the title came from: model | text | filename. Worth recording,
     # because a title lifted from a scanner's filename is not a title.
@@ -239,17 +242,6 @@ class DocumentMeta:
             "correspondent": self.correspondent or "unknown",
             "para": self.para,
         }
-
-
-def fold(text: str) -> str:
-    """Lowercase and strip diacritics.
-
-    Tesseract without the Swedish language pack does not garble å ä ö, it drops
-    the diacritics - "Förfallodatum" comes out as "Forfallodatum". Folding both
-    sides means the rules still fire on a badly OCR'd Swedish document.
-    """
-    normalised = unicodedata.normalize("NFKD", text.casefold())
-    return "".join(char for char in normalised if not unicodedata.combining(char))
 
 
 @lru_cache(maxsize=8)
@@ -458,29 +450,50 @@ def plausible_date(value: date) -> bool:
     return date(1900, 1, 1) <= value <= date.today()
 
 
-def resolve_date(meta: DocumentMeta, source: Path | None, config: Config) -> DocumentMeta:
-    """Fill in a missing date from the file itself, in the configured order.
+def resolve_date(
+    meta: DocumentMeta, source: Path | None, config: Config, text: str = ""
+) -> DocumentMeta:
+    """Fill in the document's date, in the configured order.
 
-    A date printed on the document always wins. Everything else is a guess, so
-    the note records which guess it was.
+    A date printed on the document always wins - the model usually reports it,
+    and when it does not we read it out of the text ourselves. Everything after
+    that is a guess about a file rather than a fact about a document, so the
+    note records which guess it was.
     """
+    day_first = config.dates.day_first
+    use_text = "text" in config.dates.fallbacks and bool(text.strip())
+
     if meta.document_date and plausible_date(meta.document_date):
         meta.date_source = "document"
+        # The model reads the whole document, so it is usually right. But a
+        # date it invented appears nowhere in the text, and when the text has
+        # one under "Fakturadatum" that is the better answer.
+        if use_text and meta.document_date not in {
+            candidate.value for candidate in find_dates(text, day_first)
+        }:
+            labelled = strong_date(text, day_first)
+            if labelled and labelled != meta.document_date:
+                log.debug(
+                    "%s: model said %s, which is not in the text; using the labelled %s",
+                    source.name if source else "document",
+                    meta.document_date,
+                    labelled,
+                )
+                meta.document_date = labelled
         return meta
     if meta.document_date:
         log.warning("ignoring implausible date %s", meta.document_date)
         meta.document_date = None
-    if source is None:
-        return meta
 
     finders = {
-        "filename": lambda path: date_from_filename(path.name),
+        "text": lambda path: (date_from_text(text, day_first) or (None,))[0] if use_text else None,
+        "filename": lambda path: date_from_filename(path.name) if path else None,
         # Only a PDF has PDF metadata; asking pypdf to read a Markdown note
         # produces a page of complaints and no date.
         "pdf-metadata": lambda path: (
-            pdf_creation_date(path) if path.suffix.lower() == ".pdf" else None
+            pdf_creation_date(path) if path and path.suffix.lower() == ".pdf" else None
         ),
-        "file-created": file_created_date,
+        "file-created": lambda path: file_created_date(path) if path else None,
     }
     for name in config.dates.fallbacks:
         finder = finders.get(name)
@@ -488,13 +501,14 @@ def resolve_date(meta: DocumentMeta, source: Path | None, config: Config) -> Doc
             log.warning("unknown date fallback %r; skipping", name)
             continue
         found = finder(source)
+        label = source.name if source else "document"
         if found and not plausible_date(found):
-            log.debug("%s: ignoring implausible %s date %s", source.name, name, found)
+            log.debug("%s: ignoring implausible %s date %s", label, name, found)
             found = None
         if found:
             meta.document_date = found
             meta.date_source = name
-            log.debug("%s: date %s taken from %s", source.name, found, name)
+            log.debug("%s: date %s taken from %s", label, found, name)
             return meta
     return meta
 
@@ -543,7 +557,7 @@ def heuristic(text: str, config: Config, fallback_title: str) -> DocumentMeta:
         title=title,
         category=category,
         summary="",
-        document_date=parse_date(text[:4000], config.dates.day_first),
+        document_date=(date_from_text(text, config.dates.day_first) or (None, ""))[0],
         confidence=0.2,
         classifier="heuristic",
         title_source=title_source,

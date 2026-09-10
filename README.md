@@ -241,7 +241,7 @@ language: "English"
 confidence: 0.95
 para: "archive"
 classifier: "llm"
-scanvault_version: "0.16.0"
+scanvault_version: "0.17.0"
 processed: "2026-09-10T09:02:23Z"
 source_file: "scan_001.pdf"
 source_hash: "9f2c…"
@@ -358,28 +358,54 @@ scanvault organize --vault ~/Obsidian/Archive --apply
 ## Dating a document
 
 The date a document is filed under is the date printed *on* it — the invoice
-date, the statement date, the date at the top of a letter — extracted from the
-text by the model. Plenty of scans do not carry one, so scanvault falls back, in
-this order:
+date, the statement date, the date at the top of a letter. The model reports it,
+and scanvault reads the text itself as well, because a date the model missed is
+still printed on the page. Only if the document truly carries no date does it
+fall back to the file:
 
 | `date_source` | Where the date came from |
 | --- | --- |
-| `document` | Printed on the document itself. Always preferred. |
+| `document` | The model read it off the document. Always preferred. |
+| `text` | scanvault found it in the OCR text — see below. |
 | `filename` | Parsed from the file name — `receipt Mar 5, 2017.pdf`, `statement_03_Jul_2025.pdf`, `2016-09-08 letter.pdf`. Only patterns with a four-digit year count, so an account number cannot pose as a date. |
 | `pdf-metadata` | The `/CreationDate` the scanner wrote into the PDF. |
-| `file-created` | The file's own creation date (modification time where the platform does not record one). |
+| `file-created` | The file's oldest timestamp. Copying a document into a vault resets its creation time to now while carrying its modification time across, so the older of the two is used — otherwise every adopted document is dated the day you ran the organizer. |
 
 Every note records which one was used, so a guessed date is never mistaken for a
 real one. To review the guesses in Obsidian, search `date_source: "file-created"`.
 
+### Which date on the page
+
+A page has several dates on it and only one of them dates the document, so the
+reader does not take the first thing that looks like a date. It finds all of
+them, then reads the words in front of each:
+
+* **A labelled date wins.** `Invoice date`, `Fakturadatum`, `Statement date`,
+  `Date of issue`, `Utfärdat`, `Kvittodatum` and their neighbours mean "this is
+  the document's date", and beat an unlabelled number elsewhere on the page.
+* **A due date is never it.** `Due`, `Payment due`, `Förfallodatum`, `Sista
+  betalningsdag`, `Valid until`, `Gäller från`, `Date of birth`, `Period` —
+  a date introduced by any of those is discarded rather than ranked lower. An
+  invoice is dated the day it was written, not the day it must be paid.
+* **A range is not a date.** `1 Jan 2024 - 31 Dec 2024` is a coverage period,
+  and both ends are dropped.
+* **Otherwise, position decides**, because a letterhead is at the top and the
+  copyright line is at the bottom.
+
+Both languages are read together — `2 maj 2024`, `2 May 2024`, `May 2, 2024`,
+`2024-05-02`, `02/05/2024`, `2nd May 2024` and `March 2024` all parse — and
+Swedish is matched with the diacritics folded away, so a page OCR'd without the
+`swe` language pack still matches `Forfallodatum`.
+
 ```toml
 [dates]
-fallbacks = ["filename", "pdf-metadata", "file-created"]
+fallbacks = ["text", "filename", "pdf-metadata", "file-created"]
 day_first = true     # 03/04/2024 is the 3rd of April; set false for the US reading
 ```
 
-Reorder that list to change precedence, or set it to `[]` to leave undated
-documents in the `undated` folder rather than guessing.
+Reorder that list to change precedence, drop `"text"` to leave dating to the
+model alone, or set it to `[]` to leave undated documents in the `undated`
+folder rather than guessing.
 
 ## How good is the classification, and how would you know
 
@@ -395,19 +421,20 @@ scanvault eval --model qwen3.8-flash-next:125b-a6b-q4_K_M
 
 ```
 documents      : 39
-category        : 85%
+category        : 87%
   english       : 86%
-  swedish       : 83%
-  personal      : 81%
+  swedish       : 89%
+  personal      : 85%
   business      : 92%
 expected tags   : 100% found
+date            : 100%
 
 misses:
   hard-en-loan-letter        category Employment != Loans
   ...
 ```
 
-That 85% is the floor with **no model at all**. Six of the documents are written
+That 87% is the floor with **no model at all**. Six of the documents are written
 specifically to defeat the keyword rules — a letter about "the money you borrowed
 for your studies" that never says loan or CSN — and the deterministic layer gets
 every one of them wrong. That is the honest split: rules and heuristics handle
@@ -417,7 +444,12 @@ Two caveats worth stating. The corpus is invented, so it contains no documents o
 yours, and it was written by the same person who tuned the rules, which makes it
 a regression test rather than proof of general quality. Point `--corpus` at your
 own labelled JSON — same shape, `id`, `language`, `context`, `category`, `tags`,
-`text` — and the numbers start being about your documents.
+an optional `date` (`null` where the document carries none), `text` — and the
+numbers start being about your documents.
+
+The `date` line scores the date reader on the same corpus, and counts reading
+*no* date off a document that carries none as correct — inventing one from a
+due date is the failure this is here to catch.
 
 ## Speed
 

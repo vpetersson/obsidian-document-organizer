@@ -64,15 +64,17 @@ class OcrConfig:
     jobs: int = 0  # 0 -> let the backend decide
 
 
-DATE_SOURCES = ("filename", "pdf-metadata", "file-created")
+DATE_SOURCES = ("text", "filename", "pdf-metadata", "file-created")
 
 
 @dataclass
 class DateConfig:
-    """Where a document's date comes from when its text does not carry one.
+    """Where a document's date comes from, in the order they are tried.
 
-    The date inside the document always wins; these are tried in order after it.
-    Set to an empty list to leave undated documents undated.
+    "text" reads the date off the document itself and is the only one that is
+    evidence rather than a guess; drop it and an undated model answer falls
+    straight through to the file's own timestamps. Set the list to empty to
+    leave undated documents undated.
     """
 
     fallbacks: list[str] = field(default_factory=lambda: list(DATE_SOURCES))

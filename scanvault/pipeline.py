@@ -135,7 +135,7 @@ def prepare_document(
         )
 
     meta = classify(extracted.text, config, client, source=path, cache=cache)
-    resolve_date(meta, path, config)
+    resolve_date(meta, path, config, extracted.text)
     meta.para = bucket or config.vault.para.default_bucket
     folder = source_folder(path, source_root)
     if folder and config.vault.tag_source_folder:
