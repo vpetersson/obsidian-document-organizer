@@ -430,6 +430,10 @@ class VaultConfig:
     # How that text is presented: a callout folded shut by default, an HTML
     # <details> block, or the plain heading it used to be.
     extracted_text_style: str = "callout"
+    # Obsidian applies these as CSS classes to the note. The default lets the
+    # snippet `init-vault` writes fold the properties panel away on scanvault's
+    # notes without touching the rest of the vault. Set to [] to write none.
+    cssclasses: list[str] = field(default_factory=lambda: ["scanvault"])
     max_text_chars: int = 20000
     # Written under the vault; holds the dedupe index.
     state_dir: str = ".scanvault"

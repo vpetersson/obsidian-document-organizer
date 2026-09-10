@@ -261,6 +261,8 @@ def ingest(
     if not dry_run:
         vault.root.mkdir(parents=True, exist_ok=True)
         vault.scaffold()
+        # A vault that only ever sees `ingest` should get the snippet too.
+        vault.write_css_snippet()
     state = State(config.state_root) if use_state else None
     own_cache = cache is None
     if own_cache:

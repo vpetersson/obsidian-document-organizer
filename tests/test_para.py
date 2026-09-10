@@ -15,7 +15,7 @@ from scanvault.organizer import is_managed, plan
 from scanvault.vault import Vault, parse_frontmatter
 from tests.helpers import StubClient
 
-MANAGED = 'classifier: "llm"\n'
+MANAGED = 'classifier: "llm"\ncssclasses:\n  - scanvault\n'
 
 
 def meta(**kwargs) -> DocumentMeta:

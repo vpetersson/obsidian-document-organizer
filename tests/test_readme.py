@@ -72,7 +72,7 @@ class TestSettings(unittest.TestCase):
 
     def test_documented_defaults_are_the_real_defaults(self):
         for key, value in self.documented.items():
-            if key in EXAMPLE_KEYS or isinstance(self.real[key], (list, dict)):
+            if key in EXAMPLE_KEYS or isinstance(self.real[key], dict):
                 continue
             if key in ("ocr.languages",):  # documented as a recommendation
                 continue

@@ -24,7 +24,7 @@ from .organizer import plan as organizer_plan
 from .evaluate import evaluate, load_corpus
 from .parallel import parallel_map, resolve_workers
 from .pipeline import ingest, iter_documents, watch
-from .vault import Vault
+from .vault import CSS_SNIPPET_NAME, Vault
 
 log = logging.getLogger("scanvault")
 
@@ -314,8 +314,16 @@ def cmd_init_vault(args: argparse.Namespace) -> int:
             f"{'would create' if preview else 'created'}: "
             f"{path.relative_to(config.vault_dir).parent}"
         )
-    if not created:
-        print(f"{config.vault_dir} already has the PARA folders")
+    snippet = vault.write_css_snippet(dry_run=preview)
+    if snippet is not None:
+        print(
+            f"{'would write' if preview else 'wrote'}: "
+            f"{snippet.relative_to(config.vault_dir)} (folds the properties panel away)"
+        )
+        if not preview:
+            print("              enable it in Settings -> Appearance -> CSS snippets")
+    if not created and snippet is None:
+        print(f"{config.vault_dir} already has the folders documents are filed into")
     elif preview:
         print_preview_trailer(preview)
     return 0
@@ -394,9 +402,33 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     if config.vault_dir:
         print(f"vault       : {config.vault_dir} {'(exists)' if config.vault_dir.exists() else '(will be created)'}")
+        _report_snippet(Vault(config))
     if config.source_dir:
         print(f"source      : {config.source_dir} {'(exists)' if config.source_dir.exists() else '(MISSING)'}")
     return 0
+
+
+def _report_snippet(vault: Vault) -> None:
+    """Whether the properties panel is actually folded away in Obsidian.
+
+    Writing the snippet is not enough - Obsidian only loads snippets that are
+    switched on, and from the outside "never enabled" looks exactly like "the
+    CSS does not work".
+    """
+    path = vault.root / ".obsidian" / "snippets" / f"{CSS_SNIPPET_NAME}.css"
+    if not path.exists():
+        print("properties  : shown in full (run init-vault --apply to write the CSS snippet)")
+        return
+    enabled = vault.snippet_enabled()
+    if enabled is None:
+        print(f"properties  : {CSS_SNIPPET_NAME}.css written; open Obsidian once to enable it")
+    elif enabled:
+        print(f"properties  : folded away by {CSS_SNIPPET_NAME}.css")
+    else:
+        print(
+            f"properties  : {CSS_SNIPPET_NAME}.css written but NOT enabled"
+            " - Settings -> Appearance -> CSS snippets"
+        )
 
 
 def _report_concurrency(client: OllamaClient, workers: int) -> None:

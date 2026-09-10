@@ -28,6 +28,7 @@ NOTE = (
     '---\ntitle: "Acme Invoice"\ndate: 2024-05-02\ncategory: "Invoices"\n'
     'tags:\n  - scan\nclassifier: "llm"\n'
     'attachment: "Archive/_attachments/Invoices/2024/2024-05-02 Acme Invoice.pdf"\n'
+    "cssclasses:\n  - scanvault\n"
     "---\n\n# Acme Invoice\n"
 )
 
