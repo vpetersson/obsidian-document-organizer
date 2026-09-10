@@ -241,7 +241,7 @@ language: "English"
 confidence: 0.95
 para: "archive"
 classifier: "llm"
-scanvault_version: "0.17.0"
+scanvault_version: "0.18.0"
 processed: "2026-09-10T09:02:23Z"
 source_file: "scan_001.pdf"
 source_hash: "9f2c…"
@@ -305,7 +305,7 @@ What each action means:
 
 | Action | What `--apply` does |
 | --- | --- |
-| `ocr` | The note's PDF has no text layer. Runs OCR, **replaces the attachment with the searchable PDF**, refreshes the note's extracted text and records the backend in `ocr:`. If the note's metadata was thin, it is classified from the fresh text and refiled. |
+| `ocr` | Nothing the note points at can be read. Runs OCR, **replaces a PDF attachment with the searchable version**, refreshes the note's extracted text and records the backend in `ocr:`. If the note's metadata was thin, it is classified from the fresh text and refiled. |
 | `relocate` | Moves the note and its PDF to where the templates say they belong. |
 | `rewrite` | Keeps the location, refreshes frontmatter from a new classification. |
 | `adopt` | A PDF in the vault that no note points at: OCR'd, classified and given a note. The plan says which of them have no text layer. |
@@ -324,6 +324,32 @@ A PDF only counts as loose when **no** note references it — `attachment:` in
 frontmatter, an `![[embed]]`, a `[[wikilink]]` or a markdown link all keep it out
 of the adopt list, so PDFs your own hand-written notes point at are never filed
 a second time.
+
+### Notes that embed their scans
+
+An Obsidian note written by hand holds its pages as embeds rather than an
+`attachment:` key:
+
+```markdown
+# Bank letter
+
+![[Scan Page 196.jpg]]
+![[Scan Page 197.jpg]]
+```
+
+Those embeds are treated as the note's documents. They are OCR'd — every page,
+not just the first — and the text goes into the note, so a note that was two
+pictures becomes searchable. `![[...]]` is markup naming a file, never a word of
+the document: it is not read as text, never becomes a title or a filename, and
+is never quoted back into the extracted-text block, where it would neither
+render nor link.
+
+The images themselves are **left where they are**. The note links to them by
+name and replacing a `.jpg` with a PDF would break the link you wrote. When the
+note moves, its embeds are rewritten as vault-relative links so they keep
+working from the new location. Bare names are resolved the way Obsidian resolves
+them — beside the note first, then anywhere in the vault — and a name that
+matches two files is left alone rather than guessed at.
 
 ### The model is asked once
 

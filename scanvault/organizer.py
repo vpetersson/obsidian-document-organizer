@@ -107,20 +107,53 @@ class OrganizeReport:
         return sum(1 for action in self.actions if action.kind == kind)
 
 
+# `![[Scan Page 196.jpg]]` is markup naming a file, not a word of the document.
+# Reading it as text is how a wikilink ends up as a note's title.
+LINK_MARKUP_RE = re.compile(r"!?\[\[[^\]]*\]\]|!?\[[^\]]*\]\([^)]*\)")
+
+
+def strip_markup(body: str) -> str:
+    """A note's body with its headings and links removed.
+
+    What is left is prose the note actually carries. A note that is nothing but
+    embedded scans has none, and saying so truthfully sends it to OCR instead of
+    classifying it on the spelling of its own links.
+    """
+    without_headings = re.sub(r"^#.*$", "", body, flags=re.MULTILINE)
+    return LINK_MARKUP_RE.sub(" ", without_headings).strip()
+
+
+def note_documents(
+    vault: Vault, note: Path, frontmatter: dict[str, Any], body: str
+) -> list[Path]:
+    """The documents a note points at: its attachment, else whatever it embeds.
+
+    A hand-written note has no `attachment:` key - it embeds its scans with
+    `![[...]]`, and those are just as much the note's documents.
+    """
+    attachment = attachment_path(vault, frontmatter)
+    if attachment is not None:
+        return [attachment]
+    return vault.linked_documents(note, body)
+
+
 def note_text(vault: Vault, note: Path, frontmatter: dict[str, Any], body: str, config: Config) -> str:
     """Best text already available for a note - never runs OCR.
 
     Planning stays read-only and cheap; OCR is a separate, reported action.
     """
-    attachment = attachment_path(vault, frontmatter)
-    if attachment is not None:
-        text = pdf_text(attachment)
-        if len(text) >= config.ocr.min_text_chars:
-            return text
+    extracted = [
+        pdf_text(document)
+        for document in note_documents(vault, note, frontmatter, body)
+        if document.suffix.lower() == ".pdf"
+    ]
+    text = "\n\n".join(part for part in extracted if part)
+    if len(text) >= config.ocr.min_text_chars:
+        return text
     embedded = embedded_text(body)
     if embedded:
         return embedded
-    return re.sub(r"^#.*$", "", body, flags=re.MULTILINE).strip()
+    return strip_markup(body)
 
 
 def attachment_path(vault: Vault, frontmatter: dict[str, Any]) -> Path | None:
@@ -132,16 +165,25 @@ def attachment_path(vault: Vault, frontmatter: dict[str, Any]) -> Path | None:
     return path if path.is_file() else None
 
 
-def attachment_needs_ocr(vault: Vault, frontmatter: dict[str, Any], config: Config) -> bool:
-    """True when the note's PDF has no text layer at all.
+def documents_need_ocr(
+    vault: Vault, note: Path, frontmatter: dict[str, Any], body: str, config: Config
+) -> bool:
+    """True when nothing the note points at can be read without OCR.
 
     The bar here is "is it searchable", not `min_text_chars` - a short receipt
-    is a legitimately tiny but perfectly searchable document.
+    is a legitimately tiny but perfectly searchable document. An embedded image
+    counts: a note holding two scanned pages carries no text at all until they
+    are read.
     """
-    attachment = attachment_path(vault, frontmatter)
-    if attachment is None or attachment.suffix.lower() != ".pdf":
+    documents = note_documents(vault, note, frontmatter, body)
+    if not documents:
         return False
-    return len(pdf_text(attachment)) < config.ocr.searchable_min_chars
+    for document in documents:
+        if document.suffix.lower() != ".pdf":
+            return True  # an image: there is nothing to extract without OCR
+        if len(pdf_text(document)) < config.ocr.searchable_min_chars:
+            return True
+    return False
 
 
 def resolve_bucket(vault: Vault, note: Path, frontmatter: dict[str, Any], config: Config) -> str:
@@ -224,9 +266,15 @@ def plan(
 
         should_classify = reclassify or needs_classification(frontmatter)
 
-        if ocr and attachment_needs_ocr(vault, frontmatter, config):
-            attachment = attachment_path(vault, frontmatter)
-            reason = "attachment has no text layer"
+        if ocr and documents_need_ocr(vault, note, frontmatter, body, config):
+            documents = note_documents(vault, note, frontmatter, body)
+            attachment = documents[0] if documents else None
+            images = [path for path in documents if path.suffix.lower() != ".pdf"]
+            if images:
+                names = ", ".join(path.name for path in images)
+                reason = f"embedded image{'s' if len(images) > 1 else ''} to read ({names})"
+            else:
+                reason = "attachment has no text layer"
             if attachment is not None and needs_password(attachment):
                 reason = "attachment is password-protected (qpdf --decrypt to fix)"
             elif backend == "none":
@@ -391,26 +439,45 @@ def _run_ocr(
     client: OllamaClient | None,
     cache: ClassificationCache | None = None,
 ) -> None:
-    """OCR one attachment and re-read it. Only touches that document's files,
-    so it is safe on a worker; the note is moved and rewritten later."""
-    """OCR the note's attachment in place, then refresh its metadata and text."""
-    pdf = attachment_path(vault, action.frontmatter)
-    if pdf is None:
+    """Read everything the note points at, and refresh its metadata from it.
+
+    Only touches that note's own documents, so it is safe on a worker; the note
+    is moved and rewritten later.
+    """
+    _, body = vault.read_note(action.path)
+    documents = note_documents(vault, action.path, action.frontmatter, body)
+    if not documents:
         raise OcrError("the attachment recorded in this note is missing")
-    result = extract(pdf, config.ocr, work_dir=config.state_root / "work")
-    if result.pdf_path != pdf and result.pdf_path.exists():
-        # Keep the searchable PDF: that is the point of OCR'ing an old vault.
-        shutil.move(str(result.pdf_path), pdf)
+
+    texts: list[str] = []
+    backend = ""
+    pages = 0
+    for document in documents:
+        result = extract(document, config.ocr, work_dir=config.state_root / "work")
+        if result.pdf_path != document and result.pdf_path.exists():
+            if document.suffix.lower() == ".pdf":
+                # Keep the searchable PDF: that is the point of OCR'ing an old
+                # vault. An image stays an image - the note links to it by name,
+                # and replacing it would break the link the user wrote.
+                shutil.move(str(result.pdf_path), document)
+            else:
+                result.pdf_path.unlink(missing_ok=True)
+        if result.text.strip():
+            texts.append(result.text.strip())
+        backend = backend or result.backend
+        pages += result.pages or 0
+    text = "\n\n".join(texts)
+
     if action.classify_after:
-        action.meta = classify(result.text, config, client, source=action.path, cache=cache)
-        resolve_date(action.meta, pdf, config, result.text)
+        action.meta = classify(text, config, client, source=action.path, cache=cache)
+        resolve_date(action.meta, documents[0], config, text)
     else:
         action.meta = vault.meta_from_note(action.frontmatter, action.path.stem)
     action.meta.para = resolve_bucket(vault, action.path, action.frontmatter, config)
-    action.body_text = result.text
-    action.frontmatter["ocr"] = result.backend
-    if result.pages:
-        action.frontmatter["pages"] = result.pages
+    action.body_text = text
+    action.frontmatter["ocr"] = backend
+    if pages:
+        action.frontmatter["pages"] = pages
 
 
 def _rewrite_note(
@@ -423,13 +490,17 @@ def _rewrite_note(
         for key in ("source_file", "source_hash", "ocr", "pages", "created")
         if key in action.frontmatter
     }
+    _, body = vault.read_note(action.path)
     text = action.body_text
     if not text and vault.config.vault.include_text:
-        _, body = vault.read_note(action.path)
         text = embedded_text(body)
+    # Scans the note embedded itself, rather than through `attachment:`. The
+    # body is about to be replaced, so they have to be carried across.
+    embeds = [] if attachment is not None else vault.linked_documents(action.path, body)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(
-        vault.render_note(meta, text, attachment, extra=preserved), encoding="utf-8"
+        vault.render_note(meta, text, attachment, extra=preserved, embeds=embeds),
+        encoding="utf-8",
     )
 
 

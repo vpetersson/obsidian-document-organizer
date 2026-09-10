@@ -218,6 +218,22 @@ def file_created_date(path: Path) -> date | None:
         return None
 
 
+# Link markup a title must never carry: a note titled "![[Scan Page 196.jpg]]"
+# is a filename with brackets in it, and Obsidian renders it as a broken embed.
+_LINK_MARKUP = re.compile(r"!?\[\[[^\]]*\]\]|!?\[[^\]]*\]\([^)]*\)")
+
+
+def clean_title(value: str, max_length: int = 120) -> str:
+    """A title fit to put in frontmatter and in a filename.
+
+    OCR doubles spaces, and a line lifted out of a note body can be markup
+    rather than words.
+    """
+    without_markup = _LINK_MARKUP.sub(" ", value or "")
+    collapsed = re.sub(r"\s+", " ", without_markup).strip(" -–—_.,:;")
+    return collapsed[:max_length].strip()
+
+
 def truncate_words(text: str, max_chars: int) -> str:
     """Clip text at a word boundary so the model never sees a half word."""
     if len(text) <= max_chars:
