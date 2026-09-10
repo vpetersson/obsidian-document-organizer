@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
-from .classify import classify
+from .classify import classify, resolve_date
 from .config import Config
 from .llm import OllamaClient
 
@@ -29,10 +30,21 @@ class Result:
     expected_tags: list[str]
     actual_tags: list[str]
     title: str
+    expected_date: date | None = None
+    actual_date: date | None = None
 
     @property
     def category_ok(self) -> bool:
         return self.actual_category in self.expected_category
+
+    @property
+    def date_ok(self) -> bool:
+        """Right when it matches, and right when neither has one.
+
+        Reading no date off a document that carries none is the correct
+        answer, not a miss - it is what sends filing to the fallbacks.
+        """
+        return self.actual_date == self.expected_date
 
     @property
     def missing_tags(self) -> list[str]:
@@ -64,8 +76,14 @@ class Score:
         wanted = sum(len(r.expected_tags) for r in subset)
         return found / wanted if wanted else 1.0
 
+    def date_accuracy(self, **criteria: str) -> float:
+        subset = self._subset(**criteria)
+        if not subset:
+            return 0.0
+        return sum(1 for result in subset if result.date_ok) / len(subset)
+
     def failures(self) -> list[Result]:
-        return [r for r in self.results if not r.category_ok or r.missing_tags]
+        return [r for r in self.results if not r.category_ok or r.missing_tags or not r.date_ok]
 
     def report(self) -> str:
         lines = [
@@ -76,6 +94,7 @@ class Score:
             f"  personal      : {self.accuracy(context='personal'):.0%}",
             f"  business      : {self.accuracy(context='business'):.0%}",
             f"expected tags   : {self.tag_recall():.0%} found",
+            f"date            : {self.date_accuracy():.0%}",
         ]
         failures = self.failures()
         if failures:
@@ -90,6 +109,8 @@ class Score:
                     )
                 if result.missing_tags:
                     detail.append(f"missing tags {', '.join(result.missing_tags)}")
+                if not result.date_ok:
+                    detail.append(f"date {result.actual_date or '-'} != {result.expected_date or '-'}")
                 lines.append(f"  {result.id:26s} {'; '.join(detail)}")
         return "\n".join(lines)
 
@@ -107,6 +128,7 @@ def evaluate(
     score = Score()
     for document in corpus if corpus is not None else load_corpus():
         meta = classify(document["text"], config, client, cache=None)
+        resolve_date(meta, None, config, document["text"])
         score.results.append(
             Result(
                 id=document["id"],
@@ -121,6 +143,8 @@ def evaluate(
                 expected_tags=list(document.get("tags", [])),
                 actual_tags=list(meta.tags),
                 title=meta.title,
+                expected_date=date.fromisoformat(document["date"]) if document.get("date") else None,
+                actual_date=meta.document_date,
             )
         )
     return score

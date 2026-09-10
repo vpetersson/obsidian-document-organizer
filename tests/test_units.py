@@ -124,10 +124,16 @@ class TestClassify(unittest.TestCase):
         self.assertEqual(meta.year, "undated")
 
     def test_heuristic_picks_category_and_date(self):
-        meta = heuristic("ACME LTD\nINVOICE\nAmount due 2024-05-02", self.config, "fallback")
+        text = "ACME LTD\nINVOICE\nInvoice date 2024-05-02\nAmount due 2024-06-01"
+        meta = heuristic(text, self.config, "fallback")
         self.assertEqual(meta.category, "Invoices")
+        # The invoice date, not the due date printed under it.
         self.assertEqual(meta.document_date, date(2024, 5, 2))
         self.assertEqual(meta.classifier, "heuristic")
+
+    def test_heuristic_will_not_date_a_document_by_when_it_is_due(self):
+        meta = heuristic("ACME LTD\nINVOICE\nAmount due 2024-06-01", self.config, "fallback")
+        self.assertIsNone(meta.document_date)
 
     def test_prompt_lists_categories_and_clips_text(self):
         prompt = build_prompt("x" * 50000, self.config, "scan.pdf")

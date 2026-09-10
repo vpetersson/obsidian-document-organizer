@@ -55,6 +55,17 @@ def sha256_file(path: Path, chunk_size: int = 1 << 20) -> str:
     return digest.hexdigest()
 
 
+def fold(text: str) -> str:
+    """Lowercase and strip diacritics.
+
+    Tesseract without the Swedish language pack does not garble å ä ö, it drops
+    the diacritics - "Förfallodatum" comes out as "Forfallodatum". Folding both
+    sides means the rules still fire on a badly OCR'd Swedish document.
+    """
+    normalised = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(char for char in normalised if not unicodedata.combining(char))
+
+
 _ISO_DATE = re.compile(r"\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b")
 # 03/04/2024, 3.4.2024, 13-04-2024 - the order of the first two is a guess.
 _LITTLE_ENDIAN = re.compile(r"\b(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})\b")
@@ -185,12 +196,22 @@ def clean_document_name(stem: str) -> str:
 
 
 def file_created_date(path: Path) -> date | None:
-    """The file's creation date where the platform records one, else mtime."""
+    """The oldest timestamp the filesystem has for this file.
+
+    Whichever of birth time and mtime is older, because copying a document into
+    a vault resets its birth time to now while carrying its mtime across - and a
+    file cannot predate the document inside it. Taking the newer one is how an
+    old letter ends up dated today.
+    """
     try:
         stat = path.stat()
     except OSError:
         return None
-    stamp = getattr(stat, "st_birthtime", None) or stat.st_mtime
+    stamps = [stat.st_mtime]
+    birthtime = getattr(stat, "st_birthtime", None)
+    if birthtime:
+        stamps.append(birthtime)
+    stamp = min(stamps)
     try:
         return datetime.fromtimestamp(stamp).date()
     except (OverflowError, OSError, ValueError):
