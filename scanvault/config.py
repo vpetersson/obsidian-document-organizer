@@ -12,6 +12,7 @@ DEFAULT_CATEGORIES = [
     "Receipts",
     "Contracts",
     "Banking",
+    "Accounting",
     "Investments",
     "Pensions",
     "Loans",
@@ -41,6 +42,9 @@ CONFIG_FILENAME = "scanvault.toml"
 class OcrConfig:
     # "auto" picks ocrmypdf, then tesseract, then gives up.
     backend: str = "auto"
+    # Order matters: "swe+eng" was measured three times more accurate than
+    # "eng+swe" on Swedish documents and identical on English ones. Put your
+    # main language first, and install its tesseract pack.
     languages: str = "eng"
     # Below this many extracted characters a PDF counts as image-only, i.e.
     # worth OCR'ing when it first arrives.
@@ -82,111 +86,179 @@ class DateConfig:
 # the correspondent, the summary and the start of the text. Keywords are English
 # and Swedish because that is what this paperwork is in; add your own.
 DEFAULT_TAG_RULES: dict[str, list[str]] = {
+    # A trailing `*` matches inside a word, which is how Swedish works:
+    # "faktur*" catches faktura, fakturanummer, fakturadatum. Everything else
+    # matches on word boundaries. Both sides are folded, so a document OCR'd
+    # without the Swedish language pack ("Forfallodatum") still matches.
+    "invoice": [
+        "faktur*", "forfallodat*", "betalningsvillkor*", "drojsmalsrant*",
+        "beskattningsunderlag*", "betalningspaminnelse*", "kreditfaktur*",
+        "att betala", "ocr-nummer",
+        "invoice number", "invoice date", "amount due", "total due", "payment terms",
+        "remittance advice", "credit note", "purchase order", "bill to", "net 30",
+    ],
+    "receipt": [
+        "kassakvitto*", "kvittonummer*", "kvitto",
+        "varav moms", "oppet kop", "bytesratt", "returratt",
+        "thank you for your purchase", "card ending", "auth code", "merchant id",
+        "vat receipt", "change due",
+    ],
     "taxes": [
         "hmrc", "hm revenue", "revenue & customs", "revenue and customs", "self assessment",
-        "irs.gov", "internal revenue service", "skatteverket", "inkomstdeklaration",
-        "finanzamt", "agenzia delle entrate", "canada revenue agency", "australian taxation",
-        "tax return", "corporation tax", "vat return", "capital gains", "paye",
-        "slutskattebesked", "skatteuträkning", "moms", "deklaration", "tax credit",
-        "tax code notice", "p800", "national insurance", "personnummer",
+        "irs.gov", "internal revenue service", "skatteverket*", "inkomstdeklaration*",
+        "slutskattebesked*", "skatteutrakning*", "skattekonto*", "kvarskatt*",
+        "skatteaterbaring*", "kontrolluppgift*", "rotavdrag*", "rutavdrag*",
+        "skattereduktion*", "finanzamt", "agenzia delle entrate", "canada revenue agency",
+        "australian taxation", "tax return", "corporation tax", "vat return",
+        "capital gains", "paye", "f-skatt", "a-skatt", "slutlig skatt",
+        "unique taxpayer reference", "form 1040", "wage and tax statement", "p800",
+    ],
+    "vat": ["momsdeklaration*", "mervardesskattedeklaration*", "utgaende moms", "ingaende moms",
+            "vat return", "vat due", "vat registration number"],
+    "payroll": [
+        "arbetsgivardeklaration*", "arbetsgivaravgift*", "avdragen skatt", "payroll",
+        "employer national insurance",
     ],
     "government": [
         "council tax", "borough of", "kommun", "county council", "ministry of", "home office",
-        "companies house", "bolagsverket", "land registry", "dvla", "passport office",
-        "migrationsverket", "electoral register", "register of electors", "försäkringskassan",
-        "department for", "gov.uk", "lantmäteriet", "kronofogden", "polismyndigheten",
-        "folkbokföring", "socialstyrelsen", "transportstyrelsen", "arbetsförmedlingen",
-        "planning permission", "building control",
+        "companies house", "confirmation statement", "certificate of incorporation",
+        "articles of association", "bolagsverket*", "registreringsbevis*", "land registry", "dvla", "passport office",
+        "migrationsverket*", "electoral register", "register of electors",
+        "forsakringskassan*", "department for", "gov.uk", "lantmateriet*", "kronofogden*",
+        "polismyndighet*", "folkbokforing*", "socialstyrelsen", "transportstyrelsen*",
+        "arbetsformedlingen", "planning permission",
     ],
     "student-loan": [
-        "csn", "centrala studiestödsnämnden", "studielån", "studiemedel", "återbetalning av lån",
+        "csn", "centrala studiestodsnamnden", "studielan*", "studiemedel*", "studiebidrag*",
         "student loans company", "student finance", "tuition fee loan", "maintenance loan",
-        "federal student aid", "fafsa", "nelnet", "navient", "sallie mae", "betalningsplan",
+        "federal student aid", "fafsa", "nelnet", "navient", "sallie mae", "betalningsplan*",
     ],
     "pension": [
-        "pension", "tjänstepension", "premiepension", "pensionsmyndigheten", "workplace pension",
-        "auto enrolment", "annuity", "sipp", "401(k)", "ira contribution", "nest pension",
-        "alecta", "amf", "avtalspension", "retirement statement",
+        "pension*", "tjanstepension*", "premiepension*", "pensionsmyndighet*",
+        "workplace pension", "auto enrolment", "annuity", "sipp", "401(k)",
+        "nest pension", "alecta", "avtalspension*", "retirement statement", "orange kuvert",
     ],
     "investments": [
-        "brokerage", "portfolio statement", "dividend", "isk", "investeringssparkonto",
-        "avanza", "nordnet", "fondkonto", "share certificate", "stocks and shares isa",
-        "capital account statement", "vanguard", "index fund", "aktieutdelning",
+        "brokerage", "portfolio statement", "dividend", "isk", "investeringssparkonto*",
+        "avanza", "nordnet", "fondkonto*", "share certificate", "stocks and shares isa",
+        "capital account statement", "vanguard", "index fund", "aktieutdelning*",
+        "depaoversikt*",
     ],
     "mortgage": [
-        "mortgage", "remortgage", "redemption statement", "loan to value", "bolån",
-        "amorteringskrav", "räntebesked", "fixed rate expiry",
+        "mortgage", "remortgage", "redemption statement", "loan to value", "bolan*",
+        "amorteringskrav*", "rantebesked*", "fixed rate expiry",
     ],
     "loan": [
-        "loan agreement", "credit agreement", "instalment plan", "avbetalning", "blancolån",
-        "personal loan", "hire purchase", "overdraft",
+        "loan agreement", "credit agreement", "instalment plan", "avbetalning*", "blancolan*",
+        "personal loan", "hire purchase", "overdraft", "skuldebrev*",
     ],
     "property": [
         "tenancy", "leasehold", "freehold", "landlord", "estate agent", "service charge",
-        "ground rent", "stamp duty", "conveyanc", "hyresavtal", "bostadsrätt",
-        "föreningsstämma", "brf", "energy performance certificate", "survey report",
+        "ground rent", "stamp duty", "conveyanc*", "hyresavtal*", "hyresavi*", "hyresvard*",
+        "hyresgast*", "bostadsratt*", "foreningsstamma*", "lagfart*", "pantbrev*",
+        "fastighetsbeteckning*", "kopekontrakt*", "overlatelsebesiktning*",
+        "energideklaration*", "energy performance certificate", "title register",
+        "title number",
     ],
     "insurance": [
-        "policy number", "insurance certificate", "insurance premium", "premium due",
-        "no claims", "försäkring",
-        "hemförsäkring", "trafikförsäkring", "claim reference", "excess payable", "renewal notice",
+        "forsakring*", "sjalvrisk*", "skadeanmalan*", "skadenummer*", "ansvarsskydd*",
+        "rattsskydd*", "policy number", "policy schedule", "insurance certificate",
+        "certificate of motor insurance", "insurance premium", "premium due", "no claims",
+        "renewal notice", "declarations page",
     ],
     "utilities": [
         "electricity", "gas supply", "water and wastewater", "broadband", "meter reading",
-        "energy bill", "energy tariff", "unit rate", "elräkning", "fjärrvärme", "avfallshantering", "standing charge",
+        "energy bill", "energy tariff", "unit rate", "standing charge", "elrakning*",
+        "elnatsavgift*", "abonnemangsavgift*", "overforingsavgift*", "energiskatt*",
+        "fjarrvarme*", "sophamtning*", "renhallning*", "matarstallning*", "mpan", "mprn",
     ],
     "telecoms": [
-        "mobile bill", "sim only", "line rental", "mobilabonnemang", "bredband",
+        "mobile bill", "sim only", "line rental", "mobilabonnemang*", "bredband*",
         "data allowance", "roaming charges",
     ],
     "banking": [
-        "sort code", "iban", "account statement", "bankgiro", "swift/bic", "kontoutdrag",
-        "credit card statement", "direct debit", "autogiro", "standing order",
+        "kontoutdrag*", "kontobesked*", "arsbesked*", "saldobesked*", "kapitalbesked*",
+        "account statement", "statement of account", "closing balance", "available balance",
+        "statement period", "credit card statement",
+    ],
+    # Payment rails are printed on invoices, policies and rent slips alike, so
+    # they say how to pay rather than what the document is. Deliberately not
+    # mapped to a category.
+    "payment-details": [
+        "bankgiro*", "plusgiro*", "autogiro*", "swish", "iban", "sort code", "swift/bic",
+        "direct debit", "standing order", "routing number",
     ],
     "vehicle": [
-        "mot test", "v5c", "vehicle registration", "logbook", "besiktning", "bilprovningen",
-        "road tax", "fordonsskatt", "service history", "congestion charge", "parkeringsanmärkning",
+        "kontrollbesiktning*", "besiktningsprotokoll*", "fordonsskatt*", "trangselskatt*", "parkeringsanmarkning*", "avstallning*",
+        "chassinummer*", "matarstallning*", "mot test", "mot certificate", "v5c",
+        "vehicle registration certificate", "vehicle registration", "vehicle log book",
+        "road tax",
+        "vehicle excise duty", "vehicle identification number", "odometer",
     ],
     "medical": [
-        "nhs", "patient", "prescription", "vaccination", "vårdcentral", "1177", "remiss",
-        "journalutdrag", "dental", "optician", "referral letter", "sjukintyg",
+        "vardcentral*", "patientavgift*", "hogkostnadsskydd*", "frikort*", "journalutdrag*",
+        "lakarintyg*", "sjukintyg*", "provsvar*", "folktandvard*", "nhs", "nhs number",
+        "patient", "prescription", "vaccination", "1177 vardguiden", "dental", "optician",
+        "referral letter", "explanation of benefits",
     ],
     "employment": [
-        "payslip", "p60", "p45", "employment contract", "anställningsavtal", "lönespecifikation",
-        "notice period", "probation period", "arbetsgivarintyg", "bonus letter", "share options",
+        "lonespecifikation*", "lonebesked*", "bruttolon*", "nettolon*", "preliminarskatt*",
+        "semesterersattning*", "anstallningsavtal*", "arbetsgivarintyg*", "anstallningsnummer*",
+        "payslip", "p60", "p45", "p11d", "employment contract", "notice period",
+        "gross pay", "net pay", "earnings statement", "pay stub", "share options",
     ],
     "education": [
-        "tuition", "enrolment", "transcript of records", "antagningsbesked", "kursintyg",
-        "examensbevis", "diploma", "course certificate", "school report", "terminsbetyg",
+        "tuition", "enrolment", "transcript of records", "antagningsbesked*", "kursintyg*",
+        "examensbevis*", "terminsbetyg*", "diploma", "course certificate", "school report",
     ],
     "identity": [
-        "passport", "driving licence", "driver's license", "körkort", "id-kort", "national id",
-        "residence permit", "uppehållstillstånd", "birth certificate", "personbevis",
-        "marriage certificate", "vigselbevis",
+        "passport", "driving licence", "driver's license", "korkort*", "id-kort",
+        "national id", "residence permit", "uppehallstillstand*", "birth certificate",
+        "personbevis*", "marriage certificate", "vigselbevis*", "folkbokforingsadress*",
     ],
     "legal": [
-        "solicitor", "advokat", "power of attorney", "fullmakt", "deed of", "last will",
-        "testamente", "court claim", "claim form", "tingsrätt", "settlement agreement",
-        "bouppteckning", "arvskifte",
+        "solicitor", "advokat*", "power of attorney", "fullmakt*", "deed of", "last will",
+        "testamente*", "court claim", "claim form", "tingsratt*", "settlement agreement",
+        "bouppteckning*", "arvskifte*", "non-disclosure", "confidentiality agreement",
+        "sekretessavtal*", "governed by the laws", "malnummer*",
+    ],
+    "debt": [
+        "inkassokrav*", "betalningsforelaggande*", "betalningsanmarkning*", "delgivning*",
+        "utmatning*", "skuldsanering*", "kronofogden*", "final demand", "collection notice",
+        "county court judgment", "notice of default",
+    ],
+    "business": [
+        "organisationsnummer*", "org.nr", "vat registration", "company number",
+        "purchase order", "bill to", "faktura till", "leverantorsfaktur*", "kundfaktur*",
+        "payment terms", "betalningsvillkor*", "var referens", "styrelsen", "aktiebolag*",
+        "ltd", "plc", "gmbh", "oy", "limited company", "contract of employment",
+        "anstallningsavtal*", "employer", "arbetsgivare*",
+    ],
+    "accounting": [
+        "arsredovisning*", "arsbokslut*", "revisionsberattelse*", "balansrakning*",
+        "resultatrakning*", "forvaltningsberattelse*", "rakenskapsar*", "huvudbok*",
+        "bolagsordning*", "aktiebok*", "bolagsstamma*", "verklig huvudman",
+        "annual accounts", "profit and loss", "balance sheet", "ledger", "bookkeeping",
+        "nettoomsattning*", "auditor", "annual report",
     ],
     "travel": [
-        "boarding pass", "booking reference", "itinerary", "flight number", "hotel confirmation",
-        "biljett", "resebokning", "car hire", "travel insurance", "visa application",
+        "boarding pass", "booking reference", "itinerary", "flight number",
+        "hotel confirmation", "biljett*", "resebokning*", "car hire", "travel insurance",
+        "visa application",
     ],
     "subscription": [
-        "subscription", "membership", "renewal reminder", "medlemskap", "abonnemang",
-        "annual membership", "gym membership", "licence fee",
+        "subscription", "membership", "renewal reminder", "medlemskap*", "abonnemang*",
+        "gym membership", "licence fee",
     ],
     "warranty": [
-        "warranty", "guarantee certificate", "guarantee period", "garanti",
+        "warranty", "guarantee certificate", "guarantee period", "garanti*",
         "proof of purchase", "extended cover",
-        "return policy", "kvitto sparas",
     ],
-    "charity": ["gift aid", "donation receipt", "gåvobevis", "charity number", "sponsorship"],
-    "pets": ["veterinary", "veterinär", "microchip", "pet insurance", "vaccination card"],
+    "charity": ["gift aid", "donation receipt", "gavobevis*", "charity number", "sponsorship"],
+    "pets": ["veterinar*", "veterinary", "microchip", "pet insurance", "vaccination card"],
     "home-improvement": [
-        "quotation for", "offert", "builder", "renovation", "installation certificate",
-        "gas safety", "electrical certificate", "byggnadsarbete", "hantverkare",
+        "quotation for", "offert*", "builder", "renovation", "installation certificate",
+        "gas safety", "electrical certificate", "byggnadsarbete*", "hantverkare*",
     ],
 }
 
@@ -195,30 +267,45 @@ DEFAULT_TAG_RULES: dict[str, list[str]] = {
 # what it is, the rule wins. Only these buckets are overridable.
 GENERIC_CATEGORIES = ("Other", "Correspondence", "Personal")
 
+# These say something about a document without saying what it is, so they never
+# overrule a category that came from somewhere better.
+WEAK_TAGS = ("banking", "government", "property", "business", "legal", "payment-details")
+
 # Which category a rule tag implies, for exactly that case.
+# Tags that describe a document precisely enough to file it. Order is priority.
 DEFAULT_TAG_CATEGORIES: dict[str, str] = {
+    # Ordered most to least specific. Domain first - an electricity bill is an
+    # invoice, but "Utilities" is the shelf someone looks on - then the form of
+    # the document, then the tags too broad to file on at all.
+    "student-loan": "Loans",
     "mortgage": "Loans",
     "loan": "Loans",
-    "student-loan": "Loans",
     "pension": "Pensions",
     "investments": "Investments",
+    "vat": "Taxes",
+    "payroll": "Taxes",
     "taxes": "Taxes",
-    "government": "Government",
-    "property": "Property",
+    "accounting": "Accounting",
     "insurance": "Insurance",
+    "medical": "Medical",
+    "vehicle": "Vehicle",
     "utilities": "Utilities",
     "telecoms": "Utilities",
-    "banking": "Banking",
-    "vehicle": "Vehicle",
-    "medical": "Medical",
     "employment": "Employment",
     "education": "Education",
     "identity": "Identity",
-    "legal": "Legal",
     "travel": "Travel",
     "subscription": "Subscriptions",
-    "warranty": "Receipts",
+    "debt": "Legal",
     "home-improvement": "Property",
+    "invoice": "Invoices",
+    "receipt": "Receipts",
+    "warranty": "Receipts",
+    # From here down: too broad to overrule a category that came from elsewhere.
+    "banking": "Banking",
+    "property": "Property",
+    "government": "Government",
+    "legal": "Legal",
 }
 
 
@@ -266,7 +353,10 @@ class LlmConfig:
     num_ctx: int = 8192
     timeout: int = 300
     # How much document text the classifier gets to see.
-    max_chars: int = 12000
+    # Small models degrade well before their context window is full: measured
+    # accuracy falls off past roughly 1-2k tokens of input, and a 20-category
+    # classification does not need more than the first page or two anyway.
+    max_chars: int = 3000
     keep_alive: str = "5m"
 
 

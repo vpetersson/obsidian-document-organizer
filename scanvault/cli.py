@@ -10,10 +10,17 @@ from pathlib import Path
 
 from . import __version__
 from .config import CONFIG_FILENAME, Config, find_config, load_config
-from .extract import _image_converter, available_backend, extract, pdf_text
+from .extract import (
+    _image_converter,
+    available_backend,
+    extract,
+    missing_language_packs,
+    pdf_text,
+)
 from .llm import LlmError, OllamaClient, is_local_host
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
+from .evaluate import evaluate, load_corpus
 from .pipeline import ingest, iter_documents, watch
 from .vault import Vault
 
@@ -307,6 +314,16 @@ def cmd_init_vault(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_eval(args: argparse.Namespace) -> int:
+    config = _build_config(args)
+    client = _client(args, config)
+    corpus = load_corpus(Path(args.corpus).expanduser()) if args.corpus else None
+    score = evaluate(config, client, corpus)
+    print(f"model: {'none - rules and heuristics only' if client is None else config.llm.model}")
+    print(score.report())
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     config = _build_config(args)
     print(f"scanvault {__version__}")
@@ -315,6 +332,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     for tool in ("ocrmypdf", "tesseract", "pdftotext", "pdftoppm", "pdfunite"):
         found = shutil.which(tool)
         print(f"{tool:12s}: {found or 'MISSING'}")
+    missing = missing_language_packs(config.ocr.languages)
+    print(
+        f"ocr languages: {config.ocr.languages}"
+        + (f" - MISSING pack(s): {', '.join(missing)}" if missing else "")
+    )
+    if config.ocr.languages.split("+")[0] == "eng" and "swe" in config.ocr.languages:
+        print("              tip: put your main language first; swe+eng reads Swedish better")
     converter = _image_converter()
     print(
         f"image conv  : {converter or 'MISSING'}"
@@ -482,6 +506,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_init_vault.add_argument("--vault", required=False)
     add_execution_flags(p_init_vault)
     p_init_vault.set_defaults(func=cmd_init_vault)
+
+    p_eval = sub.add_parser(
+        "eval",
+        help="score the classifier against a labelled corpus",
+        parents=[verbosity],
+    )
+    p_eval.add_argument("--corpus", help="path to a corpus JSON file")
+    add_llm_flags(p_eval)
+    p_eval.set_defaults(func=cmd_eval)
 
     p_doctor = sub.add_parser(
         "doctor", help="check OCR backends, ollama and the model", parents=[verbosity]

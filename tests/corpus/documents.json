@@ -1,0 +1,399 @@
+[
+  {
+    "id": "en-council-tax",
+    "language": "en",
+    "context": "personal",
+    "category": "Government",
+    "tags": [
+      "government"
+    ],
+    "text": "BOROUGH OF NORTHFIELD\nCouncil Tax Bill 2024/25\nAccount 8123456\nProperty: 4 Willow Lane, Northfield\nAmount payable 1,842.00 GBP in ten instalments\nFirst instalment due 1 April 2024"
+  },
+  {
+    "id": "en-mortgage",
+    "language": "en",
+    "context": "personal",
+    "category": "Loans",
+    "tags": [
+      "mortgage"
+    ],
+    "text": "MERIDIAN BANK PLC\nAnnual Mortgage Statement\nAccount 55-0192-33\nOpening balance 214,300.00 GBP\nInterest charged 6,412.55 GBP\nStatement date 14 February 2024"
+  },
+  {
+    "id": "en-energy",
+    "language": "en",
+    "context": "personal",
+    "category": "Utilities",
+    "tags": [
+      "utilities"
+    ],
+    "text": "NORTHWIND ENERGY\nYour electricity bill\nMeter reading 41,203 kWh on 3 March 2024\nStanding charge 0.53 GBP per day\nTotal due 128.40 GBP"
+  },
+  {
+    "id": "en-payslip",
+    "language": "en",
+    "context": "personal",
+    "category": "Employment",
+    "tags": [
+      "employment"
+    ],
+    "text": "HELIOS SYSTEMS LTD\nPayslip for March 2024\nEmployee: A. Andersson\nGross pay 4,250.00 Tax 812.40 National Insurance 310.20\nNet pay 3,127.40 GBP"
+  },
+  {
+    "id": "en-gp",
+    "language": "en",
+    "context": "personal",
+    "category": "Medical",
+    "tags": [
+      "medical"
+    ],
+    "text": "NHS NORTHFIELD SURGERY\nAppointment confirmation\nPatient reference 88213\nYou are booked for a blood test on 12 April 2024 at 09:20\nPlease bring your prescription list"
+  },
+  {
+    "id": "en-car-insurance",
+    "language": "en",
+    "context": "personal",
+    "category": "Insurance",
+    "tags": [
+      "insurance",
+      "vehicle"
+    ],
+    "text": "ARDEN INSURANCE\nCertificate of Motor Insurance\nPolicy number MI-4471902\nVehicle registration AB12 CDE\nCover from 1 May 2024 to 30 April 2025\nInsurance premium 512.00 GBP"
+  },
+  {
+    "id": "en-student-loan",
+    "language": "en",
+    "context": "personal",
+    "category": "Loans",
+    "tags": [
+      "student-loan"
+    ],
+    "text": "STUDENT LOANS COMPANY\nAnnual statement 2023/24\nCustomer reference 6612349\nBalance outstanding 18,402.00 GBP\nRepayments collected through PAYE"
+  },
+  {
+    "id": "en-pension",
+    "language": "en",
+    "context": "personal",
+    "category": "Pensions",
+    "tags": [
+      "pension"
+    ],
+    "text": "ORCHARD WORKPLACE PENSION\nAnnual benefit statement\nMember number 553120\nFund value 42,118.55 GBP at 5 April 2024\nEmployer contributions 3,120.00"
+  },
+  {
+    "id": "en-receipt",
+    "language": "en",
+    "context": "personal",
+    "category": "Receipts",
+    "tags": [],
+    "text": "THE CORNER HARDWARE\nVAT receipt\n2 x paint roller 11.98\n1 x masking tape 3.49\nTotal 15.47 GBP paid by card\n7 June 2024"
+  },
+  {
+    "id": "en-tenancy",
+    "language": "en",
+    "context": "personal",
+    "category": "Property",
+    "tags": [
+      "property"
+    ],
+    "text": "ASSURED SHORTHOLD TENANCY AGREEMENT\nLandlord: Willow Lettings Ltd\nTenant: A. Andersson\nProperty: Flat 2, 18 Kiln Road\nRent 1,250.00 GBP per calendar month\nTerm 12 months from 1 September 2024"
+  },
+  {
+    "id": "en-hmrc",
+    "language": "en",
+    "context": "personal",
+    "category": "Taxes",
+    "tags": [
+      "taxes"
+    ],
+    "text": "HM REVENUE & CUSTOMS\nSelf Assessment: statement of account\nUnique Taxpayer Reference 4471 992830\nAmount due by 31 January 2025: 2,140.60 GBP"
+  },
+  {
+    "id": "en-passport",
+    "language": "en",
+    "context": "personal",
+    "category": "Identity",
+    "tags": [
+      "identity"
+    ],
+    "text": "HM PASSPORT OFFICE\nYour new passport is enclosed\nApplication reference PA-99120\nPlease check the details and sign page 3\nIssued 2 February 2024"
+  },
+  {
+    "id": "sv-elrakning",
+    "language": "sv",
+    "context": "personal",
+    "category": "Utilities",
+    "tags": [
+      "utilities"
+    ],
+    "text": "NORRVIND EL AB\nElräkning för mars 2024\nAnläggningsid 735999\nFörbrukning 412 kWh\nAtt betala 1 284 kr senast 2024-04-28"
+  },
+  {
+    "id": "sv-csn",
+    "language": "sv",
+    "context": "personal",
+    "category": "Loans",
+    "tags": [
+      "student-loan"
+    ],
+    "text": "CSN\nBetalningsplan för ditt studielån\nLånenummer 88-1234\nÅrsbelopp 9 600 kr\nStudiemedel utbetalt under 2016-2019"
+  },
+  {
+    "id": "sv-skatteverket",
+    "language": "sv",
+    "context": "personal",
+    "category": "Taxes",
+    "tags": [
+      "taxes"
+    ],
+    "text": "SKATTEVERKET\nSlutskattebesked inkomstår 2023\nPersonnummer 19xx-xxxx\nSkatteuträkning bifogas\nÅterbetalning 4 210 kr"
+  },
+  {
+    "id": "sv-hyresavtal",
+    "language": "sv",
+    "context": "personal",
+    "category": "Property",
+    "tags": [
+      "property"
+    ],
+    "text": "HYRESAVTAL\nHyresvärd: Almgrens Fastigheter AB\nHyresgäst: A. Andersson\nLägenhet 1102, Kvarngatan 4\nHyra 8 950 kr per månad\nAvtalet gäller från 2024-03-01"
+  },
+  {
+    "id": "sv-forsakring",
+    "language": "sv",
+    "context": "personal",
+    "category": "Insurance",
+    "tags": [
+      "insurance"
+    ],
+    "text": "TRYGGVIND FÖRSÄKRING\nFörsäkringsbrev hemförsäkring\nFörsäkringsnummer 22-990112\nPremie 2 480 kr per år\nGäller från 2024-05-01"
+  },
+  {
+    "id": "sv-lonespec",
+    "language": "sv",
+    "context": "personal",
+    "category": "Employment",
+    "tags": [
+      "employment"
+    ],
+    "text": "HELIOS SYSTEMS AB\nLönespecifikation mars 2024\nAnställd: A. Andersson\nBruttolön 48 000 kr Skatt 14 200 kr\nNettolön 33 800 kr"
+  },
+  {
+    "id": "sv-vardcentral",
+    "language": "sv",
+    "context": "personal",
+    "category": "Medical",
+    "tags": [
+      "medical"
+    ],
+    "text": "VÅRDCENTRALEN EKLIDEN\nKallelse till besök\nPatient: A. Andersson\nRemiss från 1177\nTid 2024-04-12 kl 09:20"
+  },
+  {
+    "id": "sv-besiktning",
+    "language": "sv",
+    "context": "personal",
+    "category": "Vehicle",
+    "tags": [
+      "vehicle"
+    ],
+    "text": "FORDONSBESIKTNING AB\nBesiktningsprotokoll\nRegistreringsnummer ABC123\nGodkänd utan anmärkning\nNästa besiktning senast 2025-06-30"
+  },
+  {
+    "id": "sv-kvitto",
+    "language": "sv",
+    "context": "personal",
+    "category": "Receipts",
+    "tags": [],
+    "text": "JÄRNHANDELN I VASASTAN\nKvitto\n2 x målarrulle 119 kr\n1 x maskeringstejp 35 kr\nTotalt 154 kr betalt med kort\n2024-06-07"
+  },
+  {
+    "id": "en-sales-invoice",
+    "language": "en",
+    "context": "business",
+    "category": "Invoices",
+    "tags": [
+      "business"
+    ],
+    "text": "HELIOS SYSTEMS LTD\nInvoice INV-2024-0188\nBill to: Kestrel Analytics Ltd\nConsulting services March 2024\nNet 8,000.00 VAT 1,600.00 Total 9,600.00 GBP\nPayment terms 30 days"
+  },
+  {
+    "id": "en-supplier-invoice",
+    "language": "en",
+    "context": "business",
+    "category": "Invoices",
+    "tags": [
+      "business"
+    ],
+    "text": "CLOUDSPAN HOSTING LTD\nInvoice CS-88213 to Helios Systems Ltd\nDedicated servers, April 2024\nSubtotal 1,240.00 VAT 248.00 Total 1,488.00 GBP\nSupplier VAT number GB432198765"
+  },
+  {
+    "id": "en-vat-return",
+    "language": "en",
+    "context": "business",
+    "category": "Taxes",
+    "tags": [
+      "taxes",
+      "business"
+    ],
+    "text": "HM REVENUE & CUSTOMS\nVAT Return acknowledgement\nVAT registration 432198765\nPeriod 03/24\nVAT due on sales 12,400.00 Net VAT to pay 8,930.00 GBP"
+  },
+  {
+    "id": "en-companies-house",
+    "language": "en",
+    "context": "business",
+    "category": "Government",
+    "tags": [
+      "government",
+      "business"
+    ],
+    "text": "COMPANIES HOUSE\nConfirmation statement filed\nCompany number 09912345 HELIOS SYSTEMS LTD\nMade up to 30 June 2024\nNext statement due 30 June 2025"
+  },
+  {
+    "id": "en-employment-contract",
+    "language": "en",
+    "context": "business",
+    "category": [
+      "Contracts",
+      "Employment"
+    ],
+    "tags": [
+      "employment",
+      "business"
+    ],
+    "text": "CONTRACT OF EMPLOYMENT\nBetween Helios Systems Ltd and B. Lindqvist\nPosition: Software Engineer\nStart date 1 August 2024\nNotice period three months\nSigned by both parties"
+  },
+  {
+    "id": "en-nda",
+    "language": "en",
+    "context": "business",
+    "category": [
+      "Contracts",
+      "Legal"
+    ],
+    "tags": [
+      "business",
+      "legal"
+    ],
+    "text": "MUTUAL NON-DISCLOSURE AGREEMENT\nBetween Helios Systems Ltd and Kestrel Analytics Ltd\nEffective 4 March 2024\nConfidential information shall not be disclosed for five years\nGoverned by the laws of England"
+  },
+  {
+    "id": "sv-leverantorsfaktura",
+    "language": "sv",
+    "context": "business",
+    "category": "Invoices",
+    "tags": [
+      "business"
+    ],
+    "text": "MOLNSPANN AB\nFaktura 2024-0451 till Helios Systems AB\nServerdrift april 2024\nBelopp 12 400 kr Moms 3 100 kr Totalt 15 500 kr\nBetalningsvillkor 30 dagar\nBankgiro 123-4567"
+  },
+  {
+    "id": "sv-momsdeklaration",
+    "language": "sv",
+    "context": "business",
+    "category": "Taxes",
+    "tags": [
+      "taxes",
+      "business"
+    ],
+    "text": "SKATTEVERKET\nMomsdeklaration period 202403\nOrganisationsnummer 556123-4567\nUtgående moms 31 000 kr Ingående moms 12 400 kr\nMoms att betala 18 600 kr"
+  },
+  {
+    "id": "sv-arbetsgivardeklaration",
+    "language": "sv",
+    "context": "business",
+    "category": "Taxes",
+    "tags": [
+      "taxes",
+      "business"
+    ],
+    "text": "SKATTEVERKET\nArbetsgivardeklaration på individnivå\nOrganisationsnummer 556123-4567\nRedovisningsperiod mars 2024\nAvdragen skatt 84 000 kr Arbetsgivaravgifter 96 400 kr"
+  },
+  {
+    "id": "sv-arsredovisning",
+    "language": "sv",
+    "context": "business",
+    "category": [
+      "Accounting",
+      "Legal"
+    ],
+    "tags": [
+      "business"
+    ],
+    "text": "ÅRSREDOVISNING för räkenskapsåret 2023\nHelios Systems AB, organisationsnummer 556123-4567\nNettoomsättning 12 400 tkr\nResultat efter finansiella poster 1 210 tkr\nFastställd på årsstämman 2024-05-14"
+  },
+  {
+    "id": "sv-bolagsverket",
+    "language": "sv",
+    "context": "business",
+    "category": "Government",
+    "tags": [
+      "government",
+      "business"
+    ],
+    "text": "BOLAGSVERKET\nRegistreringsbevis\nHelios Systems AB 556123-4567\nStyrelsen ändrad enligt anmälan\nRegistrerat 2024-02-20"
+  },
+  {
+    "id": "sv-anstallningsavtal",
+    "language": "sv",
+    "context": "business",
+    "category": [
+      "Contracts",
+      "Employment"
+    ],
+    "tags": [
+      "employment",
+      "business"
+    ],
+    "text": "ANSTÄLLNINGSAVTAL\nMellan Helios Systems AB och B. Lindqvist\nBefattning: systemutvecklare\nAnställningen börjar 2024-08-01\nUppsägningstid tre månader\nUndertecknat av båda parter"
+  },
+  {
+    "id": "hard-en-loan-letter",
+    "language": "en",
+    "context": "personal",
+    "category": "Loans",
+    "tags": [],
+    "text": "NORTHFIELD FINANCE\nDear Ms Andersson\nWe write about the money you borrowed for your studies.\nThe outstanding sum is 18,402.00 and collection continues through your salary.\nNo action is needed from you."
+  },
+  {
+    "id": "hard-sv-pension-letter",
+    "language": "sv",
+    "context": "personal",
+    "category": "Pensions",
+    "tags": [],
+    "text": "FRAMTIDA TRYGGHET AB\nHej!\nDitt sparande inför tiden efter arbetslivet växte med 4,2 procent i fjol.\nDet samlade värdet var 421 118 kronor vid årsskiftet.\nInga åtgärder krävs."
+  },
+  {
+    "id": "hard-en-utility-letter",
+    "language": "en",
+    "context": "personal",
+    "category": "Utilities",
+    "tags": [],
+    "text": "NORTHWIND\nWe are changing how we bill you\nFrom June your readings will be taken monthly rather than quarterly.\nYour direct debit stays at 96.00 a month.\nNothing else changes."
+  },
+  {
+    "id": "hard-sv-vehicle-letter",
+    "language": "sv",
+    "context": "personal",
+    "category": "Vehicle",
+    "tags": [],
+    "text": "TRAFIKKONTORET\nPåminnelse\nDin bil med registreringsnummer ABC123 ska kontrolleras före den 30 juni.\nBoka tid hos valfri verkstad.\nAvgiften betalas på plats."
+  },
+  {
+    "id": "hard-en-business-letter",
+    "language": "en",
+    "context": "business",
+    "category": "Correspondence",
+    "tags": [
+      "business"
+    ],
+    "text": "KESTREL ANALYTICS LTD\nDear Helios Systems Ltd\nThank you for the work delivered in March. We are pleased with the outcome and\nhope to work together again in the autumn.\nKind regards, procurement team"
+  },
+  {
+    "id": "hard-sv-medical-letter",
+    "language": "sv",
+    "context": "personal",
+    "category": "Medical",
+    "tags": [],
+    "text": "EKLIDENS MOTTAGNING\nHej A. Andersson\nDina provsvar är klara och allt ser bra ut.\nVi hörs igen om ett år.\nHälsningar, sköterskan"
+  }
+]
