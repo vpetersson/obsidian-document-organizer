@@ -26,7 +26,7 @@ jobs:
             extras: "--extra fast"
             label: " + pypdf"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the OCR toolchain
         # Without these the OCR tests skip themselves, so CI must provide them.
