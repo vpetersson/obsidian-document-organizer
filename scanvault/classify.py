@@ -475,7 +475,11 @@ def resolve_date(meta: DocumentMeta, source: Path | None, config: Config) -> Doc
 
     finders = {
         "filename": lambda path: date_from_filename(path.name),
-        "pdf-metadata": pdf_creation_date,
+        # Only a PDF has PDF metadata; asking pypdf to read a Markdown note
+        # produces a page of complaints and no date.
+        "pdf-metadata": lambda path: (
+            pdf_creation_date(path) if path.suffix.lower() == ".pdf" else None
+        ),
         "file-created": file_created_date,
     }
     for name in config.dates.fallbacks:

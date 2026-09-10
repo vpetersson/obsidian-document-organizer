@@ -6,12 +6,13 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Any, Iterable, Iterator
 
 from .cache import ClassificationCache
+from .parallel import Progress, parallel_map, resolve_workers
 from .classify import DocumentMeta, classify, resolve_date
 from .config import Config
-from .extract import DOCUMENT_SUFFIXES, OcrError, extract, is_image
+from .extract import DOCUMENT_SUFFIXES, ExtractResult, OcrError, extract, is_image
 from .llm import OllamaClient
 from .state import State
 from .util import sha256_file, slugify
@@ -84,39 +85,54 @@ def is_stable(path: Path, settle_seconds: float = 2.0) -> bool:
         return False
 
 
-def process_file(
+@dataclass
+class Prepared:
+    """Everything decided about a document before anything is written.
+
+    Splitting the read-and-think half from the write half is what lets the slow
+    half run on several workers while the vault is still only ever written by
+    one thread.
+    """
+
+    path: Path
+    digest: str
+    extracted: ExtractResult
+    meta: DocumentMeta
+    extra: dict[str, Any]
+    result: ProcessResult | None = None  # set when there is nothing to file
+
+
+def prepare_document(
     path: Path,
     config: Config,
-    vault: Vault,
     client: OllamaClient | None,
     state: State | None = None,
-    dry_run: bool = False,
     bucket: str | None = None,
     source_root: Path | None = None,
     cache: ClassificationCache | None = None,
-) -> ProcessResult:
-    """OCR one PDF, classify it, and file it in the vault.
-
-    `bucket` pins the PARA destination; without it a scan lands in the archive.
-    `source_root` is what the document's folder is recorded relative to, so an
-    existing folder tree survives as metadata after the file moves.
-    """
+) -> Prepared:
+    """Hash, OCR and classify one document. Touches nothing in the vault."""
     digest = sha256_file(path)
     if state is not None:
         known = state.get(digest)
         if known:
             log.info("skipping %s: already filed as %s", path.name, known.get("note"))
-            return ProcessResult(path, "duplicate", note=Path(str(known.get("note") or "")))
+            return _nothing_to_file(
+                path,
+                digest,
+                ProcessResult(path, "duplicate", note=Path(str(known.get("note") or ""))),
+            )
 
-    work_dir = config.state_root / "work"
     try:
-        extracted = extract(path, config.ocr, work_dir=work_dir)
+        extracted = extract(path, config.ocr, work_dir=config.state_root / "work")
     except OcrError as exc:
         log.error("OCR failed for %s: %s", path.name, exc)
-        return ProcessResult(path, "failed", error=str(exc))
+        return _nothing_to_file(path, digest, ProcessResult(path, "failed", error=str(exc)))
     except Exception as exc:  # pragma: no cover - unexpected backend crash
         log.exception("unexpected failure on %s", path.name)
-        return ProcessResult(path, "failed", error=f"{type(exc).__name__}: {exc}")
+        return _nothing_to_file(
+            path, digest, ProcessResult(path, "failed", error=f"{type(exc).__name__}: {exc}")
+        )
 
     meta = classify(extracted.text, config, client, source=path, cache=cache)
     resolve_date(meta, path, config)
@@ -134,18 +150,52 @@ def process_file(
         "ocr": extracted.backend,
         "pages": extracted.pages,
     }
+    return Prepared(path, digest, extracted, meta, extra)
+
+
+def _nothing_to_file(path: Path, digest: str, result: ProcessResult) -> Prepared:
+    empty = ExtractResult("", False, "none", path, None)
+    return Prepared(path, digest, empty, DocumentMeta("", ""), {}, result)
+
+
+def file_document(
+    prepared: Prepared,
+    config: Config,
+    vault: Vault,
+    state: State | None = None,
+    dry_run: bool = False,
+) -> ProcessResult:
+    """Write one prepared document into the vault. Single-threaded by design."""
+    if prepared.result is not None:
+        return prepared.result
+
+    # Workers prepare everything before anything is filed, so two identical
+    # documents can both pass the check in prepare_document. The index is only
+    # written on this thread, so this is where a duplicate is really caught.
+    if state is not None and prepared.digest:
+        known = state.get(prepared.digest)
+        if known:
+            log.info(
+                "skipping %s: same content as %s", prepared.path.name, known.get("note")
+            )
+            _discard_ocr_output(prepared, config)
+            return ProcessResult(
+                prepared.path, "duplicate", note=Path(str(known.get("note") or ""))
+            )
+
+    path, meta, extracted = prepared.path, prepared.meta, prepared.extracted
     written = vault.write_document(
         meta,
         extracted.text,
         pdf_path=extracted.pdf_path,
         source_path=path,
-        extra=extra,
+        extra=prepared.extra,
         dry_run=dry_run,
         original_path=path if is_image(path) else None,
     )
     if state is not None and not dry_run:
         state.record(
-            digest,
+            prepared.digest,
             note=written.note_path.relative_to(vault.root).as_posix(),
             attachment=(
                 written.attachment_path.relative_to(vault.root).as_posix()
@@ -164,6 +214,34 @@ def process_file(
         meta=meta,
         ocr_backend=extracted.backend,
     )
+
+
+def _discard_ocr_output(prepared: Prepared, config: Config) -> None:
+    """Drop the searchable PDF a worker made for a document we will not file."""
+    produced = prepared.extracted.pdf_path
+    if produced == prepared.path or not prepared.extracted.ocr_performed:
+        return
+    try:
+        if produced.parent == config.state_root / "work":
+            produced.unlink(missing_ok=True)
+    except OSError as exc:  # pragma: no cover - best effort
+        log.debug("could not remove %s: %s", produced, exc)
+
+
+def process_file(
+    path: Path,
+    config: Config,
+    vault: Vault,
+    client: OllamaClient | None,
+    state: State | None = None,
+    dry_run: bool = False,
+    bucket: str | None = None,
+    source_root: Path | None = None,
+    cache: ClassificationCache | None = None,
+) -> ProcessResult:
+    """OCR one PDF, classify it, and file it in the vault."""
+    prepared = prepare_document(path, config, client, state, bucket, source_root, cache)
+    return file_document(prepared, config, vault, state, dry_run)
 
 
 def ingest(
@@ -194,20 +272,24 @@ def ingest(
 
     report = Report()
     paths = list(paths)
-    for index, path in enumerate(paths, start=1):
-        log.info("[%d/%d] %s", index, len(paths), path.name)
-        report.results.append(
-            process_file(
-                path,
-                config,
-                vault,
-                client,
-                state,
-                dry_run,
-                source_root=config.source_dir,
-                cache=cache,
-            )
+    workers = resolve_workers(config.llm.workers) if client is not None else 1
+    progress = Progress(len(paths))
+
+    def prepare(path: Path) -> Prepared:
+        progress.start(path.name)
+        return prepare_document(
+            path, config, client, state, source_root=config.source_dir, cache=cache
         )
+
+    def failed(path: Path, exc: Exception) -> Prepared:
+        return _nothing_to_file(
+            path, "", ProcessResult(path, "failed", error=f"{type(exc).__name__}: {exc}")
+        )
+
+    for prepared in parallel_map(prepare, paths, workers, on_error=failed):
+        # Writing stays on this thread: unique filenames, the dedupe index and
+        # the cache file are all shared state.
+        report.results.append(file_document(prepared, config, vault, state, dry_run))
     if state is not None and not dry_run:
         state.save()
     if own_cache and cache is not None:

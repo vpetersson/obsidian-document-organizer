@@ -16,11 +16,18 @@ from pathlib import Path
 from typing import Any
 
 from .cache import ClassificationCache
+from .parallel import Progress, parallel_map, resolve_workers
 from .classify import DocumentMeta, classify, resolve_date
 from .config import BUCKETS, Config
 from .extract import OcrError, available_backend, extract, is_image, needs_password, pdf_text
 from .llm import OllamaClient
-from .pipeline import process_file
+from .pipeline import (
+    Prepared,
+    ProcessResult,
+    _nothing_to_file,
+    file_document,
+    prepare_document,
+)
 from .state import State
 from .util import sha256_file, unique_path
 from .vault import Vault
@@ -193,8 +200,13 @@ def plan(
 
     notes = list(vault.iter_notes())
     log.info("scanning %d notes", len(notes))
-    classified = 0
-    for index, note in enumerate(notes, start=1):
+
+    # Two passes: read every note and decide what it needs, which is cheap, then
+    # send the ones that need the model out to the workers. Actions are appended
+    # in note order either way, so the output does not depend on who finished
+    # first.
+    pending: list[tuple[Path, dict[str, Any], str, bool]] = []
+    for note in notes:
         try:
             frontmatter, body = vault.read_note(note)
         except OSError as exc:
@@ -225,16 +237,40 @@ def plan(
             report.actions.append(action)
             continue
 
-        text = ""
+        pending.append((note, frontmatter, body, should_classify))
+
+    to_classify = [entry for entry in pending if entry[3]]
+    workers = resolve_workers(config.llm.workers) if client is not None else 1
+    if to_classify:
+        log.info(
+            "classifying %d notes on %d worker%s",
+            len(to_classify),
+            workers,
+            "" if workers == 1 else "s",
+        )
+    progress = Progress(len(to_classify))
+
+    def classify_note(entry: tuple[Path, dict[str, Any], str, bool]) -> tuple[str, DocumentMeta]:
+        note, frontmatter, body, _ = entry
+        progress.start(note.name)
+        text = note_text(vault, note, frontmatter, body, config)
+        meta = classify(text, config, client, source=note, cache=cache)
+        resolve_date(meta, attachment_path(vault, frontmatter) or note, config)
+        return text, meta
+
+    classified_by_note = dict(
+        zip(
+            (entry[0] for entry in to_classify),
+            parallel_map(classify_note, to_classify, workers),
+        )
+    )
+
+    for note, frontmatter, body, should_classify in pending:
         if should_classify:
-            classified += 1
-            # Each of these is a model call, so say which one we are on.
-            log.info("[%d/%d] classifying %s", index, len(notes), note.name)
-            text = note_text(vault, note, frontmatter, body, config)
-            meta = classify(text, config, client, source=note, cache=cache)
-            resolve_date(meta, attachment_path(vault, frontmatter) or note, config)
+            text, meta = classified_by_note[note]
             reason = "reclassified" if reclassify else "incomplete metadata"
         else:
+            text = ""
             meta = vault.meta_from_note(frontmatter, note.stem)
             reason = "layout drift"
         meta.para = resolve_bucket(vault, note, frontmatter, config)
@@ -265,6 +301,8 @@ def plan(
             report.actions.append(Action("noop", note, note, "already filed", meta))
             continue
         report.actions.append(Action("relocate", note, target, reason, meta, frontmatter, text))
+
+    classified = len(to_classify)
 
     if adopt:
         known_hashes = State(config.state_root).documents
@@ -407,6 +445,44 @@ def apply(
     own_cache = cache is None
     if own_cache:
         cache = ClassificationCache(config.state_root, config, enabled=use_cache)
+    adopts = [action for action in report.actions if action.kind == "adopt"]
+    workers = resolve_workers(config.llm.workers) if client is not None else 1
+    prepared_adopts: dict[Path, Prepared] = {}
+    if adopts:
+        log.info(
+            "reading %d unfiled documents on %d worker%s",
+            len(adopts),
+            workers,
+            "" if workers == 1 else "s",
+        )
+        adopt_progress = Progress(len(adopts))
+
+        def read_document(action: Action) -> Prepared:
+            adopt_progress.start(action.path.name)
+            return prepare_document(
+                action.path,
+                config,
+                client,
+                state,
+                bucket=vault.bucket_from_path(action.path),
+                source_root=vault.root,
+                cache=cache,
+            )
+
+        def unreadable(action: Action, exc: Exception) -> Prepared:
+            return _nothing_to_file(
+                action.path,
+                "",
+                ProcessResult(action.path, "failed", error=f"{type(exc).__name__}: {exc}"),
+            )
+
+        prepared_adopts = dict(
+            zip(
+                (action.path for action in adopts),
+                parallel_map(read_document, adopts, workers, on_error=unreadable),
+            )
+        )
+
     todo = [
         action
         for action in report.actions
@@ -423,17 +499,18 @@ def apply(
             log.info("[%d/%d] %s %s", done, len(todo), action.kind, action.path.name)
 
             if action.kind == "adopt":
-                bucket = vault.bucket_from_path(action.path)
-                result = process_file(
-                    action.path,
-                    config,
-                    vault,
-                    client,
-                    state,
-                    bucket=bucket,
-                    source_root=vault.root,
-                    cache=cache,
-                )
+                prepared = prepared_adopts.get(action.path)
+                if prepared is None:  # a plan built elsewhere, or --no-adopt
+                    prepared = prepare_document(
+                        action.path,
+                        config,
+                        client,
+                        state,
+                        bucket=vault.bucket_from_path(action.path),
+                        source_root=vault.root,
+                        cache=cache,
+                    )
+                result = file_document(prepared, config, vault, state)
                 if result.status == "failed":
                     action.kind, action.error = "failed", result.error
                 else:
