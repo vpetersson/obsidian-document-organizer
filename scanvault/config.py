@@ -358,6 +358,9 @@ class LlmConfig:
     # classification does not need more than the first page or two anyway.
     max_chars: int = 3000
     keep_alive: str = "5m"
+    # Documents classified at once. The model server has to allow it too:
+    # ollama caps concurrent requests with OLLAMA_NUM_PARALLEL.
+    workers: int = 4
 
 
 @dataclass

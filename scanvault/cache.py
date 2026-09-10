@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,8 @@ class ClassificationCache:
         self.hits = 0
         self.misses = 0
         self._dirty = False
+        # Workers share one cache; every mutation is read-modify-write.
+        self._lock = threading.Lock()
         if enabled:
             self.load()
 
@@ -89,23 +92,27 @@ class ClassificationCache:
     def get(self, text: str) -> dict[str, Any] | None:
         if not self.enabled or not self.read:
             return None
-        entry = self.entries.get(self.key(text))
+        with self._lock:
+            entry = self.entries.get(self.key(text))
         response = entry.get("response") if isinstance(entry, dict) else None
-        if isinstance(response, dict):
-            self.hits += 1
-            return response
-        self.misses += 1
-        return None
+        with self._lock:
+            if isinstance(response, dict):
+                self.hits += 1
+                return response
+            self.misses += 1
+        return response if isinstance(response, dict) else None
 
     def put(self, text: str, response: dict[str, Any]) -> None:
         if not self.enabled:
             return
-        self.entries[self.key(text)] = {
+        entry = {
             "response": response,
             "model": self.model,
             "cached_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
-        self._dirty = True
+        with self._lock:
+            self.entries[self.key(text)] = entry
+            self._dirty = True
 
     def summary(self) -> str:
         return f"{self.hits} cached, {self.misses} new"

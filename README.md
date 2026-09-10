@@ -371,6 +371,31 @@ a regression test rather than proof of general quality. Point `--corpus` at your
 own labelled JSON — same shape, `id`, `language`, `context`, `category`, `tags`,
 `text` — and the numbers start being about your documents.
 
+## Speed
+
+Classification dominates a big run: OCR is seconds, the model is seconds *per
+document*, and a vault has hundreds. Documents are read and classified on
+several workers at once, and everything that touches the vault stays on one
+thread, so filenames, the dedupe index and the cache are never raced.
+
+```bash
+scanvault organize --vault ~/Obsidian/Archive --workers 8 --apply
+```
+
+Four at a time by default. The ceiling is not this tool but the model server:
+ollama serialises requests beyond `OLLAMA_NUM_PARALLEL`, so raising `--workers`
+past that just queues.
+
+```bash
+OLLAMA_NUM_PARALLEL=8 ollama serve
+```
+
+Worth knowing before you turn it up: the workers also run OCR, and `ocrmypdf` is
+itself multi-threaded, so on a laptop 4 workers each running OCR can be slower
+than 2. `[ocr] jobs` caps what each OCR pass uses. `--workers 1` restores the
+old strictly-sequential behaviour, and `scanvault doctor` prints what you are
+set to.
+
 ## What the classifier is doing, and why
 
 Three layers, in order of how much they can be trusted:

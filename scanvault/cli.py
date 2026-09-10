@@ -21,6 +21,7 @@ from .llm import LlmError, OllamaClient, is_local_host
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
 from .evaluate import evaluate, load_corpus
+from .parallel import resolve_workers
 from .pipeline import ingest, iter_documents, watch
 from .vault import Vault
 
@@ -45,6 +46,7 @@ force = false
 fallbacks = ["filename", "pdf-metadata", "file-created"]
 
 [llm]
+workers = 4             # documents classified at once; see OLLAMA_NUM_PARALLEL
 host = "http://localhost:11434"   # any ollama endpoint; the default keeps everything local
 model = "qwen3.5:9b"
 temperature = 0.0
@@ -129,6 +131,8 @@ def _build_config(args: argparse.Namespace) -> Config:
         overrides["vault_dir"] = str(vault)
     if getattr(args, "model", None):
         overrides["llm.model"] = args.model
+    if getattr(args, "workers", None):
+        overrides["llm.workers"] = args.workers
     if getattr(args, "ollama_host", None):
         overrides["llm.host"] = args.ollama_host
     if getattr(args, "lang", None):
@@ -358,6 +362,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print("pypdf       : not installed (optional, falls back to pdftotext)")
 
     client = OllamaClient(config.llm)
+    print(f"workers      : {resolve_workers(config.llm.workers)} classified at once")
     where = (
         "this machine"
         if is_local_host(config.llm.host)
@@ -431,6 +436,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_llm_flags(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument(
+            "--workers",
+            type=int,
+            help="documents classified at once (default: 4; ollama's "
+            "OLLAMA_NUM_PARALLEL has to allow it too)",
+        )
         sp.add_argument("--model", help="ollama model tag (default: qwen3.5:9b)")
         sp.add_argument("--ollama-host", help="ollama base URL")
         sp.add_argument("--no-llm", action="store_true", help="skip ollama, use heuristics")
