@@ -62,6 +62,55 @@ class OcrConfig:
     optimize: int = 1
     timeout: int = 900
     jobs: int = 0  # 0 -> let the backend decide
+    # Rasterise the page at this resolution before reading it. 0 leaves the
+    # scan at whatever resolution it already carries, which is right for a
+    # first pass; `re-ocr` raises it, because a scan read badly at 200 dpi is
+    # often read correctly at 400.
+    oversample: int = 0
+    # unpaper: straighten, de-speckle and de-noise the page first. Off by
+    # default because it needs a tool that is not part of the OCR toolchain,
+    # and because on a clean scan it can remove thin type along with the dirt.
+    clean: bool = False
+    # Resolution the tesseract fallback rasterises PDFs at, via pdftoppm.
+    rasterize_dpi: int = 300
+
+
+# The re-OCR passes, most conservative first. Each is a way of reading the same
+# page differently; see `scanvault/reocr.py` for what each one does.
+REOCR_PASSES = ("force", "oversample", "clean")
+
+
+@dataclass
+class QualityConfig:
+    """When extracted text counts as too garbled to keep.
+
+    The score is `scanvault.quality.score_text`: 0.0 is noise, 1.0 is clean
+    prose. The two thresholds are where a vault's documents get sorted into
+    "leave it", "worth reading again" and "certainly wrong".
+    """
+
+    # Below this, `re-ocr` offers to read the document again.
+    threshold: float = 0.45
+    # Below this the text is not merely poor, it is not language at all.
+    gibberish_below: float = 0.25
+    # Text shorter than this is reported but never re-OCR'd: a receipt's whole
+    # text layer is two lines, and there is not enough of it to judge.
+    min_sample_chars: int = 60
+    # What a normally filled page yields. Used only to cap the score of a
+    # document that gave up far less than its page count suggests it should:
+    # sixty characters off a sheet of A4 is a failed read, however word-like
+    # those sixty characters are.
+    chars_per_page: int = 400
+    # A re-OCR pass has to beat the text already there by this much before it
+    # replaces it. Without it, noise that scores 0.11 instead of 0.10 would be
+    # written over the original for nothing.
+    min_gain: float = 0.05
+    # Stop escalating once a pass reaches this: further passes cost minutes per
+    # document and cannot do better than "readable".
+    good_enough: float = 0.7
+    # Which passes to try, in order. Trim it to go faster, or to drop `clean`
+    # if unpaper is not installed.
+    passes: list[str] = field(default_factory=lambda: list(REOCR_PASSES))
 
 
 DATE_SOURCES = ("text", "filename", "pdf-metadata", "file-created")
@@ -452,6 +501,7 @@ class Config:
     # "auto" keeps each document's own language for its title and summary.
     language_hint: str = "auto"
     ocr: OcrConfig = field(default_factory=OcrConfig)
+    quality: QualityConfig = field(default_factory=QualityConfig)
     dates: DateConfig = field(default_factory=DateConfig)
     tags: TagConfig = field(default_factory=TagConfig)
     llm: LlmConfig = field(default_factory=LlmConfig)

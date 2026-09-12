@@ -212,6 +212,7 @@ class TestNoteSample(unittest.TestCase):
                     "source_file": "scan_001.pdf",
                     "source_hash": "9f2c",
                     "ocr": "ocrmypdf",
+                    "ocr_quality": 0.94,
                     "pages": 2,
                 },
             )

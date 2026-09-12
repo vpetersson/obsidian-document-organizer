@@ -21,6 +21,7 @@ from .classify import DocumentMeta, classify, resolve_date
 from .config import BUCKETS, Config
 from .extract import OcrError, available_backend, extract, is_image, needs_password, pdf_text
 from .llm import OllamaClient
+from .quality import score_text
 from .pipeline import (
     Prepared,
     ProcessResult,
@@ -588,6 +589,9 @@ def _run_ocr(
     action.meta.para = resolve_bucket(vault, action.path, action.frontmatter, config)
     action.body_text = text
     action.frontmatter["ocr"] = backend
+    # Recorded so `re-ocr` and anyone reading the note can see how much of what
+    # was extracted is actually words.
+    action.frontmatter["ocr_quality"] = score_text(text, config.quality, pages).score
     if pages:
         action.frontmatter["pages"] = pages
 
@@ -603,7 +607,7 @@ def _rewrite_note(
     assert meta is not None
     preserved = {
         key: action.frontmatter[key]
-        for key in ("source_file", "source_hash", "ocr", "pages", "created")
+        for key in ("source_file", "source_hash", "ocr", "ocr_quality", "pages", "created")
         if key in action.frontmatter
     }
     preserved["cssclasses"] = merged_cssclasses(action.frontmatter, vault.config)

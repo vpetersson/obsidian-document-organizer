@@ -22,6 +22,12 @@ files you own in a folder you chose. The package and CLI are called `scanvault`.
   attachments that have no text layer, adopts loose PDFs, and re-files notes
   whose metadata is missing or whose location no longer matches the configured
   layout.
+* **Re-OCR.** OCR fails quietly: a scan read at the wrong resolution files
+  perfectly happily and its note is gibberish. `scanvault re-ocr` scores how
+  much of each document's text is actually words and reads the bad ones again
+  through progressively harder settings, keeping whichever attempt came out
+  best — including the text that was already there. See
+  [When the OCR came out as gibberish](#when-the-ocr-came-out-as-gibberish).
 
 Documents are filed by category and year under one folder. If your vault is a
 PARA ("Second Brain") vault, `layout = "para"` puts them in `4 Archive` inside
@@ -160,6 +166,10 @@ scanvault ocr ~/Scans/inbox --out ~/Scans/ocr --text-out ~/Scans/text --apply
 scanvault organize --vault ~/Obsidian/Archive
 scanvault organize --vault ~/Obsidian/Archive --apply
 scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
+
+# find the documents whose OCR is gibberish, then read them again
+scanvault re-ocr --vault ~/Obsidian/Archive
+scanvault re-ocr --vault ~/Obsidian/Archive --apply
 ```
 
 `ingest` is safe to re-run: every filed document is recorded by SHA-256 in
@@ -172,6 +182,7 @@ scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
 | `ingest` | file new scans from a source folder into the vault |
 | `watch` | the same, polling the source folder |
 | `organize` | OCR, reclassify and re-file documents already in the vault |
+| `re-ocr` | score the OCR text in the vault and read the unreadable documents again |
 | `ocr` | phase 1 only: turn scans into searchable PDFs and dump their text |
 | `init-vault` | create the folder documents are filed into, and the CSS snippet |
 | `init-config` | write a starting `scanvault.toml` |
@@ -185,19 +196,23 @@ Every command that writes takes `--apply` and `--dry-run`; `-v`/`--verbose` and
 | Flag | On | Meaning |
 | --- | --- | --- |
 | `--source`, `--vault` | ingest, watch | folders to read from and write to |
-| `--workers N` | ingest, watch, organize, eval | documents in flight at once |
+| `--workers N` | ingest, watch, organize, re-ocr, eval | documents in flight at once |
 | `--model`, `--ollama-host` | all of the above | which model, and where it runs |
 | `--no-llm` | all of the above | skip the model, use rules and heuristics |
-| `--lang eng+swe` | ingest, watch, ocr | OCR languages, main one first |
+| `--lang eng+swe` | ingest, watch, ocr, re-ocr | OCR languages, main one first |
 | `--force-ocr` | ingest, watch, ocr | OCR even when a text layer exists |
 | `--keep-source` | ingest, watch | copy the original instead of moving it |
 | `--no-recursive` | ingest | do not descend into subfolders |
 | `--no-state` | ingest | ignore the dedupe index |
-| `--no-cache` | ingest, organize | ask the model again instead of reusing answers |
+| `--no-cache` | ingest, organize, re-ocr | ask the model again instead of reusing answers |
 | `--reclassify` | organize | re-run the model over every note |
 | `--no-adopt` | organize | ignore PDFs no note points at |
 | `--no-ocr` | organize | skip the OCR pass |
-| `--include-unmanaged` | organize | also file notes scanvault did not write |
+| `--include-unmanaged` | organize, re-ocr | also touch notes scanvault did not write |
+| `--threshold 0.45` | re-ocr | read anything scoring below this again |
+| `--all` | re-ocr | read every document again, not only the bad ones |
+| `--limit N` | re-ocr | only the N worst-scoring documents this run |
+| `--no-reclassify` | re-ocr | keep the existing title and category |
 | `--out`, `--text-out` | ocr | where to put searchable PDFs and extracted text |
 | `--interval`, `--iterations` | watch | how often to poll, and how many times |
 | `--duplicates`, `--min-count` | tags | only tags spelled more than one way, and how rare to show |
@@ -247,11 +262,12 @@ language: "English"
 confidence: 0.95
 para: "archive"
 classifier: "llm"
-scanvault_version: "0.21.0"
+scanvault_version: "0.22.0"
 processed: "2026-09-10T09:02:23Z"
 source_file: "scan_001.pdf"
 source_hash: "9f2c…"
 ocr: "ocrmypdf"
+ocr_quality: 0.94
 pages: 2
 attachment: "Archive/_attachments/Invoices/2024/2024-05-02 Acme Ltd - Invoice INV-1234.pdf"
 cssclasses:
@@ -428,6 +444,136 @@ searchable — in Obsidian *and* in the PDF itself — with:
 ```bash
 scanvault organize --vault ~/Obsidian/Archive --apply
 ```
+
+## When the OCR came out as gibberish
+
+OCR does not fail loudly. A page read at the wrong resolution, a Swedish letter
+read without the Swedish language pack, a scan the engine took a run at while it
+was still skewed — all of those produce a text layer, a note, a title and a
+category exactly like a good scan does. Nothing reports an error. The first sign
+anything is wrong is searching the vault for a word that is plainly printed on
+the page and getting nothing back.
+
+`scanvault re-ocr` is the answer to that. It scores every document's text on how
+much of it is actually words, lists the ones that are not, and — with `--apply` —
+reads those again.
+
+```bash
+scanvault re-ocr --vault ~/Obsidian/Archive
+```
+
+```
+[dry-run] re-OCR   Archive/_attachments/Invoices/2019/2019-03-02 Kontoutdrag.pdf [0.07 gibberish] (no word-shaped tokens, no common words)
+[dry-run] re-OCR   Archive/_attachments/Other/2021/2021-06-14 pow unereo.pdf [0.31 poor] (38% of tokens look like words, only 62 characters a page came off it)
+[dry-run] skip     Archive/_attachments/Legal/2020/2020-01-09 Deed.pdf [0.00 empty] (password-protected (qpdf --decrypt to fix))
+
+214 documents scored: 1 gibberish, 1 poor, 0 empty, 206 good, 6 too short to judge
+2 to re-OCR, 1 skipped, 0 deferred
+Nothing was changed. Re-run with --apply to execute.
+```
+
+Documents that read fine are counted, not listed — on a healthy vault that is
+hundreds of lines saying nothing happened. `-v` lists them, along with every
+pass that was tried and what each one scored.
+
+### The quality score
+
+The score runs from 0.0 (noise) to 1.0 (clean prose) and is four signals
+blended, all of them plain string work in the standard library — no dictionary
+to install, no model to call, nothing that leaves the machine:
+
+| Signal | What it catches |
+| --- | --- |
+| **word shape** | Tokens that could not be words in any language: no vowel, five consonants in a row, a letter repeated four times, capitals in the middle of a word. |
+| **letters per character** | Ruined glyphs come out as `|`, `/`, `~` and stray punctuation. Good text is mostly letters. |
+| **common words** | Whether any of the words every European language is built out of are present at all. The plainest test there is: no real words means gibberish. |
+| **letters read as digits** | `lnv0lce numb3r` is the signature of a page read too small. A reference code is not this — `GB123456789` is letters *then* digits, not the two alternating. |
+
+A fifth, the number of characters that came off each page, only ever caps the
+score: a sheet of A4 that yielded sixty characters was not read, however
+word-like those sixty happen to be.
+
+No single signal decides anything, because each one is wrong on its own. A bank
+statement is figures and proper nouns with not one function word in it, and it
+reads perfectly; a page of scanner noise will land on a real word by accident
+sooner or later. Two verdicts are deliberately *not* candidates:
+
+* **`thin`** — under 60 characters. A receipt's whole text layer is two lines,
+  and that is not enough to call good or bad. Reported, never re-OCR'd.
+* **`good`** — at or above the threshold. `--all` reads these again anyway.
+
+The score is written into every note as `ocr_quality:`, by `ingest`, `organize`
+and `re-ocr` alike, so a vault filed before you read this still gets scored on
+its next organize run — and `ocr_quality < 0.5` is a perfectly good Dataview
+query.
+
+### What `--apply` actually does
+
+Each candidate is read again through a series of passes, hardest last:
+
+| Pass | What is different |
+| --- | --- |
+| `force` | The page image is read again from scratch, ignoring the text layer already on it. |
+| `oversample` | The same, rasterised at 400 dpi. Small type read badly at 200 very often reads cleanly at 400 — this is the pass that recovers most documents. |
+| `clean` | The same, with [unpaper](https://github.com/unpaper/unpaper) straightening and de-speckling the page first. Needs `unpaper` installed; without it the pass is skipped and reported, not treated as a failure. |
+
+Every pass is scored the same way the original was, and **the best reading
+wins — including the one that was already there**. Some scans really are
+illegible, and swapping one unreadable text layer for a differently unreadable
+one helps nobody:
+
+```
+re-OCR   Archive/_attachments/Invoices/2019/2019-03-02 Kontoutdrag.pdf (0.07 -> 0.91 via oversample, reclassified, now Archive/Banking/2019/2019-03-02 Nordea - Kontoutdrag.md)
+keep     Archive/_attachments/Other/2021/2021-06-14 pow unereo.pdf (0.31, best re-read 0.33 - the text already there was kept)
+
+2 re-OCR'd, 1 no better, 0 left alone, 0 failed
+```
+
+Escalation stops as soon as a pass reads well enough (`good_enough`, 0.7 by
+default). A pass that will not run — `clean` with no unpaper — is reported and
+the next one is tried.
+
+When a document does improve, three things happen: the PDF on disk is replaced
+with the newly searchable one (so the text is in the file, not just the note),
+the note's extracted-text block is rewritten around the new text, and the
+document is **reclassified**. That last one matters: a title and a category
+derived from gibberish are gibberish, so the note above was filed under `Other`
+as "pow unereo" and only becomes a Nordea statement once the text is readable.
+Reclassifying can therefore move the note, exactly as `organize` would.
+`--no-reclassify` keeps the existing metadata and leaves the note where it is.
+
+An image attachment is a special case: it is read again and its text goes into
+the note, but the `.jpg` itself is left alone, because the note links to it by
+the name you gave it.
+
+### Getting the language right
+
+Much the commonest cause of a garbled document is a page OCR'd without its
+language pack. `--lang` is the fix, and it is worth trying before anything else:
+
+```bash
+sudo apt install tesseract-ocr-swe
+scanvault re-ocr --vault ~/Obsidian/Archive --lang swe+eng --apply
+```
+
+Main language first — `swe+eng` was measured three times more accurate than
+`eng+swe` on Swedish documents and identical on English ones.
+
+### Doing it a few at a time
+
+Re-OCR is the slowest thing this program does: a page rasterised at 400 dpi and
+read from scratch takes seconds, and `clean` takes longer. `--limit` takes the
+worst-scoring documents and defers the rest to the next run, so a vault of
+several hundred can be worked through in sittings:
+
+```bash
+scanvault re-ocr --vault ~/Obsidian/Archive --limit 20 --apply
+```
+
+`--threshold` moves the bar, in either direction — `--threshold 0.7` sweeps up
+the merely mediocre, `--threshold 0.2` takes only the documents that are
+certainly wrong. Nothing is ever destroyed by running it: the original text is
+kept whenever the re-read is not clearly better.
 
 ## Dating a document
 
@@ -900,6 +1046,19 @@ image_dpi = 300                    # assumed resolution for bare images
 min_text_chars = 180               # a new scan with less text than this is OCR'd
 searchable_min_chars = 10          # a vault PDF with less text than this has no text layer
 force = false                      # re-OCR even when a text layer exists
+oversample = 0                     # rasterise at this dpi first (0 = leave the scan alone)
+clean = false                      # run unpaper over the page before reading it
+rasterize_dpi = 300                # what the tesseract fallback renders PDFs at
+
+[quality]
+# How readable OCR text has to be, scored 0.0 (noise) to 1.0 (clean prose).
+threshold = 0.45                   # below this, `re-ocr` offers to read it again
+gibberish_below = 0.25             # below this it is not language at all
+min_sample_chars = 60              # shorter than this is reported, never re-OCR'd
+chars_per_page = 400               # what a normally filled page yields
+min_gain = 0.05                    # how much better a re-read has to be to replace the original
+good_enough = 0.7                  # stop escalating passes once one reaches this
+# passes = ["force", "oversample", "clean"]   # drop "clean" if unpaper is not installed
 
 [llm]
 host = "http://localhost:11434"   # any ollama endpoint; the default keeps it all local
@@ -1033,6 +1192,15 @@ before giving up — and when it does give up it names the model instead of
 silently degrading. `scanvault doctor` now asks the model for one JSON object,
 so this shows up in a two-second check rather than halfway through a long run.
 
+**A note whose text is nonsense, or a title like `pow unereo`.** The scan was
+read badly and nothing reported it, because OCR does not fail loudly.
+`scanvault re-ocr --vault ~/Obsidian/Archive` scores every document and lists
+the ones that came out as gibberish; `--apply` reads them again and keeps
+whichever attempt was best. If the document is in a language you have no
+tesseract pack for, install the pack and pass `--lang` — that is the commonest
+cause by a distance. See
+[When the OCR came out as gibberish](#when-the-ocr-came-out-as-gibberish).
+
 **`organize` looks like it is hanging on a big vault.** It should not any more:
 planning logs `scanning N notes`, then `[i/N] classifying <note>` for every note
 it sends to the model, then `scanned N PDFs...` every 50 files while it looks for
@@ -1047,5 +1215,9 @@ have silence.
 * The model tag defaults to `qwen3.5:9b`. Use `--model` (or `[llm] model`) for
   any other ollama tag or a local Modelfile build.
 * Classification quality depends on OCR quality. `scanvault ocr --text-out --apply` is
-  the quickest way to see what the model actually gets.
+  the quickest way to see what the model actually gets, and `scanvault re-ocr`
+  finds the documents where it got nonsense.
+* The quality score judges shape, not sense. It cannot tell a real word from a
+  plausible non-word — it tells `Förfallodatum` from `F0rfa||0d4tum`, which is
+  the distinction that decides whether a scan is worth reading again.
 * Everything runs locally: no document text leaves the machine.
