@@ -141,7 +141,15 @@ class TestPreviewIsTheDefault(unittest.TestCase):
         subparsers = next(
             action for action in parser._actions if isinstance(action.choices, dict)
         ).choices
-        for name in ("ingest", "watch", "ocr", "organize", "init-vault", "init-config"):
+        for name in (
+            "ingest",
+            "watch",
+            "ocr",
+            "organize",
+            "re-ocr",
+            "init-vault",
+            "init-config",
+        ):
             options = {option for action in subparsers[name]._actions for option in action.option_strings}
             self.assertIn("--apply", options, f"{name} is missing --apply")
             self.assertIn("--dry-run", options, f"{name} is missing --dry-run")

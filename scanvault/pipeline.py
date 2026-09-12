@@ -14,6 +14,7 @@ from .classify import DocumentMeta, classify, resolve_date
 from .config import Config
 from .extract import DOCUMENT_SUFFIXES, ExtractResult, OcrError, extract, is_image
 from .llm import OllamaClient
+from .quality import score_text
 from .state import State
 from .tags import TagLedger, ledger_for, report_folded
 from .util import sha256_file, slugify
@@ -150,6 +151,12 @@ def prepare_document(
         "source_folder": folder,
         "source_hash": digest,
         "ocr": extracted.backend,
+        # How much of the extracted text is actually words. A document
+        # that files perfectly and scores 0.08 was read as gibberish, and
+        # this is what `scanvault re-ocr` finds it by.
+        "ocr_quality": score_text(
+            extracted.text, config.quality, extracted.pages
+        ).score,
         "pages": extracted.pages,
     }
     return Prepared(path, digest, extracted, meta, extra)

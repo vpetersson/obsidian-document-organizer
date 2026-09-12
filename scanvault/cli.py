@@ -24,6 +24,10 @@ from .organizer import plan as organizer_plan
 from .evaluate import evaluate, load_corpus
 from .parallel import parallel_map, resolve_workers
 from .pipeline import ingest, iter_documents, watch
+from .quality import score_text
+from .reocr import PASS_DESCRIPTIONS
+from .reocr import apply as reocr_apply
+from .reocr import plan as reocr_plan
 from .tags import ledger_for
 from .vault import CSS_SNIPPET_NAME, Vault
 
@@ -42,6 +46,14 @@ languages = "eng"       # e.g. "eng+swe"
 image_dpi = 300         # assumed resolution when filing a bare image
 min_text_chars = 180
 force = false
+
+[quality]
+# How readable the OCR text has to be. `scanvault re-ocr` reads anything below
+# `threshold` again; see `scanvault re-ocr --help`.
+threshold = 0.45
+gibberish_below = 0.25
+min_gain = 0.05
+# passes = ["force", "oversample", "clean"]   # drop "clean" without unpaper
 
 [dates]
 # Only used when the document's own text carries no date.
@@ -229,11 +241,22 @@ def cmd_ocr(args: argparse.Namespace) -> int:
         path = Path(source).expanduser()
         for pdf in iter_documents(path):
             if preview:
-                chars = len(pdf_text(pdf))
-                if chars < config.ocr.searchable_min_chars:
+                quality = score_text(pdf_text(pdf), config.quality)
+                if quality.chars < config.ocr.searchable_min_chars:
                     print(f"would OCR: {pdf.name} (no text layer)")
+                elif quality.readable:
+                    print(
+                        f"would skip: {pdf.name} (already searchable, {quality.chars} chars, "
+                        f"{quality.describe()})"
+                    )
                 else:
-                    print(f"would skip: {pdf.name} (already searchable, {chars} chars)")
+                    # Text is there and it is not words. `re-ocr` is the command
+                    # that does something about that; say so rather than
+                    # reporting the file as fine.
+                    print(
+                        f"would skip: {pdf.name} (has a text layer, but {quality.describe()}"
+                        " - see `scanvault re-ocr`)"
+                    )
                 continue
             try:
                 result = extract(pdf, config.ocr, work_dir=out_dir or pdf.parent)
@@ -246,11 +269,68 @@ def cmd_ocr(args: argparse.Namespace) -> int:
                 target.mkdir(parents=True, exist_ok=True)
                 (target / f"{pdf.stem}.txt").write_text(result.text, encoding="utf-8")
             print(
-                f"{pdf.name}: {result.backend}, {result.char_count} chars"
+                f"{pdf.name}: {result.backend}, {result.char_count} chars, "
+                f"quality {score_text(result.text, config.quality).describe()}"
                 + (f", searchable pdf -> {result.pdf_path}" if result.ocr_performed else "")
             )
     print_preview_trailer(preview)
     return 1 if failures else 0
+
+
+def cmd_reocr(args: argparse.Namespace) -> int:
+    config = _build_config(args)
+    if config.vault_dir is None:
+        raise SystemExit("--vault is required")
+    preview = is_preview(args)
+    report = reocr_plan(
+        config,
+        threshold=args.threshold,
+        include_all=args.all,
+        include_unmanaged=args.include_unmanaged,
+    )
+    if args.limit is not None:
+        # The plan is sorted worst first, so a limit keeps the documents most
+        # in need of it and defers the rest to the next run.
+        for candidate in report.todo[args.limit :]:
+            candidate.kind = "deferred"
+            candidate.reason = f"beyond --limit {args.limit}"
+
+    if not preview and report.todo:
+        reocr_apply(
+            report,
+            config,
+            _client(args, config),
+            reclassify=not args.no_reclassify,
+            use_cache=not args.no_cache,
+        )
+
+    if args.verbose:
+        print("passes: " + "; ".join(f"{n} - {d}" for n, d in PASS_DESCRIPTIONS.items()))
+    # "keep" is the answer for most of a healthy vault, and hundreds of those
+    # lines bury the handful that matter. The summary still counts them.
+    for candidate in report.documents:
+        if candidate.kind in ("good", "thin") and not args.verbose:
+            continue
+        print(("[dry-run] " if preview else "") + candidate.describe(config.vault_dir))
+        if candidate.error:
+            print(f"  error: {candidate.error}", file=sys.stderr)
+        if args.verbose and candidate.attempts:
+            print("  tried " + ", ".join(a.describe() for a in candidate.attempts))
+
+    print(f"\n{report.summary()}")
+    if preview:
+        print(
+            f"{len(report.todo)} to re-OCR, {report.count('skipped')} skipped, "
+            f"{report.count('deferred')} deferred"
+        )
+        print_preview_trailer(True)
+        return 0
+    print(
+        f"{report.count('improved')} re-OCR'd, {report.count('unchanged')} no better, "
+        f"{report.count('skipped') + report.count('deferred')} left alone, "
+        f"{report.count('failed')} failed"
+    )
+    return 1 if report.count("failed") else 0
 
 
 def cmd_organize(args: argparse.Namespace) -> int:
@@ -380,6 +460,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     for tool in ("ocrmypdf", "tesseract", "pdftotext", "pdftoppm", "pdfunite"):
         found = shutil.which(tool)
         print(f"{tool:12s}: {found or 'MISSING'}")
+    unpaper = shutil.which("unpaper")
+    print(
+        f"{'unpaper':12s}: {unpaper or 'MISSING'}"
+        + ("" if unpaper else " (optional; only the `clean` re-ocr pass uses it)")
+    )
     missing = missing_language_packs(config.ocr.languages)
     print(
         f"ocr languages: {config.ocr.languages}"
@@ -622,6 +707,41 @@ def build_parser() -> argparse.ArgumentParser:
     add_execution_flags(p_org)
     add_llm_flags(p_org)
     p_org.set_defaults(func=cmd_organize)
+
+    p_reocr = sub.add_parser(
+        "re-ocr",
+        help="score the OCR text in the vault and read the unreadable ones again",
+        parents=[verbosity],
+    )
+    p_reocr.add_argument("--vault", required=False)
+    p_reocr.add_argument(
+        "--threshold",
+        type=float,
+        help="re-OCR anything scoring below this, 0.0-1.0 (default: 0.45)",
+    )
+    p_reocr.add_argument(
+        "--all", action="store_true", help="read every document again, not just the bad ones"
+    )
+    p_reocr.add_argument(
+        "--limit", type=int, help="only the N worst-scoring documents this run"
+    )
+    p_reocr.add_argument("--lang", help="OCR languages to read with, e.g. swe+eng")
+    p_reocr.add_argument(
+        "--no-reclassify",
+        action="store_true",
+        help="keep the existing title and category instead of re-deriving them",
+    )
+    p_reocr.add_argument(
+        "--no-cache", action="store_true", help="ask the model again instead of reusing answers"
+    )
+    p_reocr.add_argument(
+        "--include-unmanaged",
+        action="store_true",
+        help="also read documents attached to notes scanvault did not write",
+    )
+    add_execution_flags(p_reocr)
+    add_llm_flags(p_reocr)
+    p_reocr.set_defaults(func=cmd_reocr)
 
     p_init_vault = sub.add_parser(
         "init-vault",

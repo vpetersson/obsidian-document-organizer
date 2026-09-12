@@ -181,6 +181,10 @@ def _ocrmypdf(src: Path, dst: Path, config: OcrConfig) -> str:
         cmd.append("--rotate-pages")
     if config.deskew:
         cmd.append("--deskew")
+    if config.oversample:
+        cmd += ["--oversample", str(config.oversample)]
+    if config.clean:
+        cmd.append("--clean")
     if config.optimize:
         cmd += ["--optimize", str(config.optimize)]
     if config.jobs:
@@ -200,7 +204,17 @@ def _tesseract(src: Path, dst: Path, config: OcrConfig) -> str:
             raise OcrError(f"{tool} is required for the tesseract backend")
     with tempfile.TemporaryDirectory(prefix="scanvault-ocr-") as tmp:
         tmpdir = Path(tmp)
-        result = _run(["pdftoppm", "-r", "300", "-png", str(src), str(tmpdir / "page")], config.timeout)
+        result = _run(
+            [
+                "pdftoppm",
+                "-r",
+                str(config.rasterize_dpi or 300),
+                "-png",
+                str(src),
+                str(tmpdir / "page"),
+            ],
+            config.timeout,
+        )
         if result.returncode != 0:
             raise OcrError(f"pdftoppm failed: {result.stderr.strip()[:400]}")
         images = sorted(tmpdir.glob("page-*.png"))
@@ -342,9 +356,12 @@ def image_to_pdf(src: Path, dst: Path, config: OcrConfig) -> str:
                 str(config.image_dpi),
                 "--output-type",
                 "pdf",
-                str(source),
-                str(dst),
             ]
+            if config.oversample:
+                cmd += ["--oversample", str(config.oversample)]
+            if config.clean:
+                cmd.append("--clean")
+            cmd += [str(source), str(dst)]
             result = _run(cmd, config.timeout)
             if result.returncode != 0 or not dst.exists():
                 if ALPHA_REFUSAL in result.stderr and shutil.which("tesseract"):
