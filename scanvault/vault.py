@@ -16,7 +16,7 @@ from . import __version__
 from .classify import DocumentMeta
 from .config import BUCKETS, Config
 from .extract import DOCUMENT_SUFFIXES
-from .util import parse_date, safe_filename, unique_path
+from .util import parse_date, safe_filename, unique_path, walk_files
 
 log = logging.getLogger(__name__)
 
@@ -456,7 +456,11 @@ class Vault:
         root = self.config.notes_root
         if not root.exists():
             return
-        for path in sorted(root.rglob("*.md")):
+        # walk_files rather than rglob: a vault folder that is a symlink to
+        # somewhere else is still part of the vault.
+        for path in walk_files(root):
+            if path.suffix.lower() != ".md":
+                continue
             if any(part.startswith(".") for part in path.relative_to(self.root).parts):
                 continue
             yield path
@@ -481,8 +485,9 @@ class Vault:
         name = Path(target).name
         matches = [
             path
-            for path in self.root.rglob(name)
-            if path.is_file() and not any(part.startswith(".") for part in path.parts)
+            for path in walk_files(self.root)
+            if path.name == name
+            and not any(part.startswith(".") for part in path.relative_to(self.root).parts)
         ]
         # Ambiguous is as good as missing: acting on the wrong file is worse
         # than leaving the note alone.
@@ -527,8 +532,8 @@ class Vault:
             for target in link_targets(body):
                 self._record_link(target, linked_paths, linked_names)
 
-        for path in sorted(self.root.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in DOCUMENT_SUFFIXES:
+        for path in walk_files(self.root):
+            if path.suffix.lower() not in DOCUMENT_SUFFIXES:
                 continue
             if any(part.startswith(".") for part in path.relative_to(self.root).parts):
                 continue

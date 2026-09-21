@@ -175,6 +175,25 @@ scanvault re-ocr --vault ~/Obsidian/Archive --apply
 `ingest` is safe to re-run: every filed document is recorded by SHA-256 in
 `<vault>/.scanvault/index.json`, so the same scan is never filed twice.
 
+### What `--source` looks at
+
+Every subfolder, unless you pass `--no-recursive` — **including folders that are
+symlinks**, because a scanner folder is very often a link to where the documents
+actually live: an alias into iCloud Drive, a network share, an external disk. A
+link pointing back at its own parent is walked once rather than forever.
+
+Two things are skipped, and both say so rather than looking like an empty
+folder:
+
+* a folder scanvault is not allowed to read — "nothing to do" and "not allowed
+  to look" should not print the same thing;
+* a file that is in iCloud but has not been downloaded to this machine. macOS
+  leaves a hidden `.name.pdf.icloud` placeholder in its place and there are no
+  bytes to read, so scanvault names them and moves on.
+
+Hidden folders (anything starting with `.`) are left alone, as is scanvault's
+own `.ocr.pdf` working output.
+
 ## Commands
 
 | Command | What it does |

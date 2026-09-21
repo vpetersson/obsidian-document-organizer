@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
 import re
 import unicodedata
 from datetime import date, datetime
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 _SLUG_STRIP = re.compile(r"[^\w\s-]", re.UNICODE)
 _SLUG_SPACE = re.compile(r"[\s_]+")
@@ -232,6 +236,54 @@ def clean_title(value: str, max_length: int = 120) -> str:
     without_markup = _LINK_MARKUP.sub(" ", value or "")
     collapsed = re.sub(r"\s+", " ", without_markup).strip(" -–—_.,:;")
     return collapsed[:max_length].strip()
+
+
+def walk_files(root: Path, recursive: bool = True) -> list[Path]:
+    """Every file under `root`, following symlinked folders.
+
+    `Path.rglob` does not descend into a symlinked directory, so a source
+    folder holding a link to where the scans actually live - an alias into
+    iCloud Drive, a network share, an external disk - looked completely empty
+    and said nothing about it. This walks with `os.scandir` instead, and
+    remembers which directories it has already been in so a link pointing at
+    its own parent cannot loop forever.
+
+    Sorted, so a run's order does not depend on the filesystem. Unreadable
+    directories are reported rather than silently skipped: "nothing to do" and
+    "not allowed to look" should not look the same.
+    """
+    found: list[Path] = []
+    seen: set[tuple[int, int]] = set()
+    warned: set[str] = set()
+    queue = [root]
+    while queue:
+        directory = queue.pop()
+        try:
+            marker = directory.stat()
+            key = (marker.st_dev, marker.st_ino)
+            if key in seen:
+                continue
+            seen.add(key)
+            entries = list(os.scandir(directory))
+        except FileNotFoundError:
+            # A folder that is not there has nothing in it; that is an answer,
+            # not a problem.
+            continue
+        except OSError as exc:
+            if str(directory) not in warned:
+                warned.add(str(directory))
+                log.warning("could not read %s: %s", directory, exc.strerror or exc)
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir():  # follows symlinks, which is the point
+                    if recursive:
+                        queue.append(Path(entry.path))
+                elif entry.is_file():
+                    found.append(Path(entry.path))
+            except OSError:  # a broken link, or one we cannot stat
+                continue
+    return sorted(found)
 
 
 def truncate_words(text: str, max_chars: int) -> str:
