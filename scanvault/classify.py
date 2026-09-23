@@ -16,6 +16,7 @@ from .config import GENERIC_CATEGORIES, WEAK_TAGS, Config
 from .dates import date_from_text, find_dates, strong_date
 from .extract import pdf_creation_date
 from .llm import LlmError, OllamaClient
+from .select import read_screenshot_name, screenshot_names
 from .tags import TagLedger
 from .util import (
     clean_document_name,
@@ -470,6 +471,16 @@ def plausible_date(value: date) -> bool:
     return date(1900, 1, 1) <= value <= date.today()
 
 
+def screenshot_date(source: Path | None, config: Config) -> date | None:
+    """The day a screenshot was taken, read off its filename. None otherwise."""
+    if source is None or not config.dates.screenshot_capture_time:
+        return None
+    screenshot = read_screenshot_name(source.name, screenshot_names(config.source))
+    if screenshot is None or not plausible_date(screenshot.taken_at.date()):
+        return None
+    return screenshot.taken_at.date()
+
+
 def resolve_date(
     meta: DocumentMeta, source: Path | None, config: Config, text: str = ""
 ) -> DocumentMeta:
@@ -480,8 +491,49 @@ def resolve_date(
     that is a guess about a file rather than a fact about a document, so the
     note records which guess it was.
     """
+    before = meta.document_date
+    _resolve_date(meta, source, config, text)
+    if config.tags.year_tag and meta.document_date != before:
+        _retag_year(meta, before)
+    return meta
+
+
+def _retag_year(meta: DocumentMeta, previous: date | None) -> None:
+    """Keep the `year-` tag on the date the note actually ended up with.
+
+    Tags are assembled while classifying, before anything has decided which of
+    the dates in play is the document's. When that decision moves the date - a
+    screenshot dated by its capture time rather than by the receipt in the
+    picture - the tag has to move with it, or the note says 2024 in its
+    frontmatter and 2019 in its tags, and neither search finds it twice.
+    """
+    stale = f"year-{previous.year}" if previous else ""
+    wanted = f"year-{meta.document_date.year}" if meta.document_date else ""
+    if stale == wanted:
+        return
+    at = meta.tags.index(stale) if stale in meta.tags else len(meta.tags)
+    tags = [tag for tag in meta.tags if tag != stale]
+    if wanted and wanted not in tags:
+        # Swapped in where the old one stood, so the tag list keeps its order.
+        tags.insert(min(at, len(tags)), wanted)
+    meta.tags = tags
+
+
+def _resolve_date(
+    meta: DocumentMeta, source: Path | None, config: Config, text: str = ""
+) -> DocumentMeta:
     day_first = config.dates.day_first
     use_text = "text" in config.dates.fallbacks and bool(text.strip())
+
+    # A screenshot is dated by the clock that took it, not by anything in the
+    # picture. This runs ahead of the model's answer rather than after it,
+    # because a screenshot of a 2019 invoice is a 2019 invoice to the model and
+    # a file from last Tuesday to everyone who has to find it again.
+    taken = screenshot_date(source, config)
+    if taken is not None:
+        meta.document_date = taken
+        meta.date_source = "screenshot"
+        return meta
 
     if meta.document_date and plausible_date(meta.document_date):
         # The heuristic classifier records where it read the date; only a date
@@ -598,6 +650,26 @@ def heuristic(
     return meta
 
 
+def filename_title(source: Path | None, config: Config) -> str:
+    """The title to fall back on when nothing better can be read.
+
+    A scanner's filename is noise, not a title: strip what it stamps on and
+    only keep what is left if there is something to keep. A screenshot's name
+    is nothing but stamp, and a thousand notes called "Screenshot" are a
+    thousand notes nobody can tell apart - so a capture keeps the moment it was
+    taken, unless someone has written something of their own into the name.
+    """
+    if source is None:
+        return "Untitled document"
+    screenshot = read_screenshot_name(source.name, screenshot_names(config.source))
+    if screenshot is not None:
+        return (
+            clean_document_name(screenshot.rest)
+            or f"Screenshot {screenshot.taken_at:%Y-%m-%d %H.%M.%S}"
+        )
+    return clean_document_name(source.stem) or "Untitled document"
+
+
 def classify(
     text: str,
     config: Config,
@@ -607,9 +679,7 @@ def classify(
     ledger: TagLedger | None = None,
 ) -> DocumentMeta:
     """Classify one document, degrading to heuristics when configured to."""
-    # A scanner's filename is noise, not a title: strip what it stamps on and
-    # only keep what is left if there is something to keep.
-    fallback_title = (clean_document_name(source.stem) if source else "") or "Untitled document"
+    fallback_title = filename_title(source, config)
     if not text.strip():
         meta = heuristic("", config, fallback_title, ledger)
         meta.tags = _clean_tags(["empty-text"], config, [], ledger)

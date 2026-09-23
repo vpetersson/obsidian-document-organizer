@@ -15,6 +15,7 @@ from .config import Config
 from .extract import DOCUMENT_SUFFIXES, ExtractResult, OcrError, extract, is_image
 from .llm import OllamaClient
 from .quality import score_text
+from .select import is_screenshot, keeper, screenshot_names
 from .state import State
 from .tags import TagLedger, ledger_for, report_folded
 from .util import sha256_file, slugify
@@ -51,7 +52,14 @@ class Report:
         return [result for result in self.results if result.status == "failed"]
 
 
-def iter_documents(source: Path, recursive: bool = True) -> Iterator[Path]:
+def iter_documents(
+    source: Path, recursive: bool = True, keep: Callable[[Path], bool] | None = None
+) -> Iterator[Path]:
+    """Every document under `source`, or only the ones `keep` accepts.
+
+    Naming a single file is taking responsibility for it, so an explicit path
+    is yielded whatever `keep` thinks of it.
+    """
     if source.is_file():
         yield source
         return
@@ -62,6 +70,8 @@ def iter_documents(source: Path, recursive: bool = True) -> Iterator[Path]:
         if any(part.startswith(".") for part in path.relative_to(source).parts):
             continue
         if path.name.endswith(".ocr.pdf"):
+            continue
+        if keep is not None and not keep(path):
             continue
         yield path
 
@@ -104,6 +114,23 @@ class Prepared:
     result: ProcessResult | None = None  # set when there is nothing to file
 
 
+def tag_from_file(meta: DocumentMeta, value: str, ledger: TagLedger | None) -> None:
+    """Add a tag decided by where the file was, not by what is written in it.
+
+    Through the ledger like every other tag, so a vault that already spells it
+    `screenshots` does not gain a second, near-identical `screenshot` - which
+    is the whole reason the ledger exists.
+    """
+    tag = slugify(value)
+    if ledger is not None and tag:
+        tag = ledger.canonical(tag)
+    if not tag or tag in meta.tags:
+        return
+    meta.tags.append(tag)
+    if ledger is not None:
+        ledger.record([tag])
+
+
 def prepare_document(
     path: Path,
     config: Config,
@@ -143,9 +170,12 @@ def prepare_document(
     folder = source_folder(path, source_root)
     if folder and config.vault.tag_source_folder:
         for part in folder.split("/"):
-            tag = slugify(part)
-            if tag and tag not in meta.tags:
-                meta.tags.append(tag)
+            tag_from_file(meta, part, ledger)
+    # A screenshot of a receipt is a receipt, and is filed as one - but
+    # "everything I ever captured off a screen" is its own search, and only the
+    # filename knows the answer.
+    if config.source.screenshot_tag and is_screenshot(path, screenshot_names(config.source)):
+        tag_from_file(meta, config.source.screenshot_tag, ledger)
     extra = {
         "source_file": path.name,
         "source_folder": folder,
@@ -286,7 +316,7 @@ def ingest(
     if paths is None:
         if config.source_dir is None:
             raise ValueError("source_dir is required")
-        paths = iter_documents(config.source_dir)
+        paths = iter_documents(config.source_dir, keep=keeper(config.source))
 
     report = Report()
     paths = list(paths)
@@ -350,10 +380,13 @@ def watch(
         raise ValueError("source_dir is required")
     total = Report()
     round_number = 0
+    keep = keeper(config.source)
     while iterations is None or round_number < iterations:
         round_number += 1
         pending = [
-            p for p in iter_documents(config.source_dir) if is_stable(p, settle_seconds)
+            p
+            for p in iter_documents(config.source_dir, keep=keep)
+            if is_stable(p, settle_seconds)
         ]
         if pending:
             total.results.extend(ingest(config, pending, client, dry_run=dry_run).results)

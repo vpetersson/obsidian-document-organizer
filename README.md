@@ -159,6 +159,9 @@ scanvault ingest --source ~/Scans/inbox --vault ~/Obsidian/Archive --apply
 # keep watching the scanner folder
 scanvault watch --source ~/Scans/inbox --vault ~/Obsidian/Archive --interval 30 --apply
 
+# a Desktop is not an inbox: take the screenshots and the PDFs, leave the rest
+scanvault ingest --source ~/Desktop --only screenshots,pdfs --vault ~/Obsidian/Archive
+
 # phase 1 only: OCR into searchable PDFs and dump the text
 scanvault ocr ~/Scans/inbox --out ~/Scans/ocr --text-out ~/Scans/text --apply
 
@@ -202,6 +205,7 @@ Every command that writes takes `--apply` and `--dry-run`; `-v`/`--verbose` and
 | `--lang eng+swe` | ingest, watch, ocr, re-ocr | OCR languages, main one first |
 | `--force-ocr` | ingest, watch, ocr | OCR even when a text layer exists |
 | `--keep-source` | ingest, watch | copy the original instead of moving it |
+| `--only screenshots,pdfs` | ingest, watch | file only part of what is in the source folder |
 | `--no-recursive` | ingest | do not descend into subfolders |
 | `--no-state` | ingest | ignore the dedupe index |
 | `--no-cache` | ingest, organize, re-ocr | ask the model again instead of reusing answers |
@@ -585,6 +589,7 @@ fall back to the file:
 
 | `date_source` | Where the date came from |
 | --- | --- |
+| `screenshot` | The moment the capture was taken, stamped into its filename by the program that took it. Outranks everything below, including the model — see [Archiving a Desktop](#archiving-a-desktop). |
 | `document` | The model read it off the document. Always preferred. |
 | `text` | scanvault found it in the OCR text — see below. |
 | `filename` | Parsed from the file name — `receipt Mar 5, 2017.pdf`, `statement_03_Jul_2025.pdf`, `2016-09-08 letter.pdf`. Only patterns with a four-digit year count, so an account number cannot pose as a date. |
@@ -621,11 +626,16 @@ Swedish is matched with the diacritics folded away, so a page OCR'd without the
 [dates]
 fallbacks = ["text", "filename", "pdf-metadata", "file-created"]
 day_first = true     # 03/04/2024 is the 3rd of April; set false for the US reading
+screenshot_capture_time = true   # a capture is dated by the clock that took it
 ```
 
 Reorder that list to change precedence, drop `"text"` to leave dating to the
 model alone, or set it to `[]` to leave undated documents in the `undated`
 folder rather than guessing.
+
+`screenshot_capture_time` is not in that list because it is not a fallback: it
+runs *ahead* of the document's own date rather than after it. See
+[Archiving a Desktop](#archiving-a-desktop) for why.
 
 ## How good is the classification, and how would you know
 
@@ -940,6 +950,84 @@ Palette images with a `tRNS` chunk are left alone: they are also transparent,
 but ocrmypdf reads them without complaint, so rewriting one would be a
 conversion spent fixing something that is not broken.
 
+## Archiving a Desktop
+
+A scanner's inbox holds nothing but scans, so `ingest` takes everything it
+finds there. A Desktop is the opposite: years of screenshots, the odd PDF
+someone emailed, and a pile of app icons, exported logos and wallpapers that
+are not documents at all. Filing the lot would bury the paperwork under the
+furniture, so `--only` says which part of it you meant:
+
+```bash
+# read what it would do, then run it again with --apply
+scanvault ingest --source ~/Desktop --only screenshots,pdfs --vault ~/Obsidian/Archive
+scanvault ingest --source ~/Desktop --only screenshots,pdfs --vault ~/Obsidian/Archive --apply
+```
+
+**`--apply` empties what it files off the Desktop**, into the vault — that is
+what archiving it means, and `source_action = "move"` is the default. Read the
+preview first, and pass `--keep-source` if you would rather leave the Desktop
+as it is and copy.
+
+| `--only` | What it takes |
+| --- | --- |
+| `all` | everything scanvault can read — the default, and what an inbox wants |
+| `screenshots` | files whose *name* says a program captured them off a screen |
+| `pdfs` | `.pdf` only |
+| `images` | any image format, screenshots included |
+
+Comma-separated, and they add up: `--only screenshots,pdfs` takes both. The
+same thing goes in the config file as `include` under `[source]`, which is
+easier to live with than a flag you have to remember. Either way a value that
+is not one of those four is refused rather than guessed at, because the way a
+typo would otherwise go is *wider*. Naming a single file outright still files
+it whatever the filter says — that is you taking responsibility for it.
+
+Everything else works as it always did: each screenshot is OCR'd into a
+searchable PDF and classified from what is written in it, so a screenshot of a
+receipt is filed under `Receipts` and a screenshot of a booking under `Travel`.
+The picture is filed into the vault alongside the PDF it became, the way
+[any other image is](#photos-and-other-image-formats). Re-running is safe, so a
+first pass over `--only pdfs` and a later one over `--only screenshots` file
+each document once between them.
+
+### A screenshot is dated by the clock that took it
+
+Every screen capture carries the moment it was taken in its own filename —
+`Screenshot 2024-05-02 at 14.23.07.png` — and that is the only honest record
+of it. Copying the file resets its creation time, and the picture itself says
+nothing: a screenshot of a 2019 invoice is a 2019 invoice to the model, and a
+file from last Tuesday to everyone who has to find it again. So the capture
+time wins outright, ahead of the model and ahead of any date in the text, and
+the note records `date_source: "screenshot"`. The `year-` tag moves with it, so
+the frontmatter and the tags never name two different years. Set
+`screenshot_capture_time = false` under `[dates]` to date captures like any
+other document.
+
+Recognised are the names Apple's own screenshot tool writes, in the languages
+macOS ships — `Screenshot`, the pre-Mojave `Screen Shot`, `Skärmavbild`,
+`Bildschirmfoto`, `Capture d'écran`, `Captura de pantalla`, `スクリーンショット`,
+`截屏` and the rest — plus CleanShot, which names its files the same way. Both
+a date *and* a time have to be in the name: that pair is what makes it a stamp
+rather than a word someone typed, so a file merely called `Screenshot.png` is
+an image like any other. Another capture tool goes in `screenshot_names` under
+`[source]`, which adds to the built-in list rather than replacing it.
+
+Every screenshot is also tagged `screenshot`, because "everything I ever
+captured off a screen" is a search someone will run and only the filename knows
+the answer. Change the word with `screenshot_tag`, or set it to `""` to write
+no tag. And a capture whose name is nothing but the stamp is titled after the
+moment it was taken — `Screenshot 2024-05-02 14.23.07` — because a thousand
+notes called `Screenshot` are a thousand notes nobody can tell apart. Words you
+wrote into the name yourself win over that.
+
+```toml
+[source]
+include = ["all"]               # all | screenshots | pdfs | images
+screenshot_names = []           # added to the built-in list of capture tools
+screenshot_tag = "screenshot"   # "" writes no tag
+```
+
 ## Naming a document
 
 A scan arrives called `SwiftScan Feb 7, 2021 11.45 AM.pdf` or `Scan 10.pdf`.
@@ -1039,6 +1127,11 @@ vault_dir  = "~/Obsidian/Archive"
 language_hint = "auto"             # "auto" keeps each document's own language
 # categories = [...]               # the classifier may only choose from this list
 
+[source]
+include = ["all"]                  # all | screenshots | pdfs | images — what to file
+screenshot_names = []              # extra names a capture tool gives its files
+screenshot_tag = "screenshot"      # tag every screen capture ("" writes no tag)
+
 [ocr]
 backend = "auto"                   # auto | ocrmypdf | tesseract | none
 languages = "swe+eng"
@@ -1069,6 +1162,7 @@ fallback_to_heuristics = true      # keep filing when ollama is down
 [dates]
 # "text" reads the date off the document; the rest are guesses about the file.
 fallbacks = ["text", "filename", "pdf-metadata", "file-created"]
+screenshot_capture_time = true     # a capture is dated by the clock that took it
 
 [vault]
 layout = "flat"                    # flat | para
