@@ -28,6 +28,7 @@ from .quality import score_text
 from .reocr import PASS_DESCRIPTIONS
 from .reocr import apply as reocr_apply
 from .reocr import plan as reocr_plan
+from .select import SELECTORS, describe, keeper, parse_selectors
 from .tags import ledger_for
 from .vault import CSS_SNIPPET_NAME, Vault
 
@@ -39,6 +40,13 @@ vault_dir = "~/Obsidian/Archive"
 language_hint = "auto"   # or a language name, to force titles and summaries into it
 
 # categories = ["Invoices", "Receipts", "Contracts", "Other"]
+
+[source]
+# Which of the files in source_dir are documents. An inbox holds nothing else,
+# so "all" is right for it. Archiving a Desktop, say what you meant:
+# include = ["screenshots", "pdfs"]
+include = ["all"]        # all | screenshots | pdfs | images
+screenshot_tag = "screenshot"   # tag every screen capture; "" writes no tag
 
 [ocr]
 backend = "auto"        # auto | ocrmypdf | tesseract | none
@@ -58,6 +66,8 @@ min_gain = 0.05
 [dates]
 # Only used when the document's own text carries no date.
 fallbacks = ["filename", "pdf-metadata", "file-created"]
+# A screenshot is dated by the clock that took it, not by what is in the picture.
+screenshot_capture_time = true
 
 [llm]
 workers = 4             # documents classified at once; see OLLAMA_NUM_PARALLEL
@@ -153,6 +163,11 @@ def _build_config(args: argparse.Namespace) -> Config:
         overrides["ocr.force"] = True
     if getattr(args, "keep_source", False):
         overrides["vault.source_action"] = "copy"
+    if getattr(args, "only", None):
+        try:
+            overrides["source.include"] = parse_selectors(args.only)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
     config = load_config(config_path, overrides)
     if config_path:
         log.debug("loaded config from %s", config_path)
@@ -180,9 +195,15 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     config = _build_config(args)
     if config.source_dir is None or config.vault_dir is None:
         raise SystemExit("both --source and --vault are required (or set them in the config file)")
-    paths = list(iter_documents(config.source_dir, recursive=not args.no_recursive))
+    paths = list(
+        iter_documents(
+            config.source_dir,
+            recursive=not args.no_recursive,
+            keep=keeper(config.source),
+        )
+    )
     if not paths:
-        print(f"No documents found in {config.source_dir}")
+        print(f"No {describe(config.source.include)} found in {config.source_dir}")
         return 0
     preview = is_preview(args)
 
@@ -632,6 +653,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
+    def add_only_flag(sp: argparse.ArgumentParser) -> None:
+        sp.add_argument(
+            "--only",
+            metavar="KIND[,KIND...]",
+            help="file only part of what is in the source folder: "
+            + ", ".join(SELECTORS)
+            + " (default: all). A Desktop is not an inbox.",
+        )
+
     def add_llm_flags(sp: argparse.ArgumentParser) -> None:
         sp.add_argument(
             "--workers",
@@ -651,6 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("--force-ocr", action="store_true", help="OCR even if a text layer exists")
     p_ingest.add_argument("--lang", help="OCR languages, e.g. eng+swe")
     p_ingest.add_argument("--keep-source", action="store_true", help="copy instead of moving originals")
+    add_only_flag(p_ingest)
     p_ingest.add_argument("--no-recursive", action="store_true")
     p_ingest.add_argument("--no-state", action="store_true", help="ignore the dedupe index")
     p_ingest.add_argument(
@@ -670,6 +701,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_watch.add_argument("--force-ocr", action="store_true")
     p_watch.add_argument("--lang")
     p_watch.add_argument("--keep-source", action="store_true")
+    add_only_flag(p_watch)
     add_execution_flags(p_watch)
     add_llm_flags(p_watch)
     p_watch.set_defaults(func=cmd_watch)

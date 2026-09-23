@@ -129,6 +129,31 @@ class DateConfig:
     fallbacks: list[str] = field(default_factory=lambda: list(DATE_SOURCES))
     # 03/04/2024 is the 3rd of April here and the 4th of March in the US.
     day_first: bool = True
+    # A screenshot's filename carries the moment it was taken, written there by
+    # the program that took it. That is a fact about the file, and it beats any
+    # date inside the picture - a screenshot of last year's invoice was taken
+    # this year - so it is used ahead of the document's own date rather than
+    # after it. Notes filed that way record `date_source: "screenshot"`.
+    screenshot_capture_time: bool = True
+
+
+@dataclass
+class SourceConfig:
+    """Which of the files in the source folder are documents.
+
+    A scanner's inbox holds nothing else, so the default takes everything
+    scanvault can read. A Desktop or a Downloads folder holds years of
+    everything, and `include` is how you say which part of it you meant.
+    """
+
+    # Any of "all", "screenshots", "pdfs", "images"; see `scanvault.select`.
+    include: list[str] = field(default_factory=lambda: ["all"])
+    # Added to the built-in list of names a screen capture arrives under, for a
+    # capture tool that names its files its own way.
+    screenshot_names: list[str] = field(default_factory=list)
+    # Tag every screenshot, so a Desktop's worth of them is one search away.
+    # "" writes no tag.
+    screenshot_tag: str = "screenshot"
 
 
 # Keyword -> tag rules applied on top of whatever the model returns, so a
@@ -500,6 +525,7 @@ class Config:
     categories: list[str] = field(default_factory=lambda: list(DEFAULT_CATEGORIES))
     # "auto" keeps each document's own language for its title and summary.
     language_hint: str = "auto"
+    source: SourceConfig = field(default_factory=SourceConfig)
     ocr: OcrConfig = field(default_factory=OcrConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
     dates: DateConfig = field(default_factory=DateConfig)

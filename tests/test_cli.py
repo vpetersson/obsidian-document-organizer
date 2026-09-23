@@ -198,5 +198,68 @@ class TestPlanOutputStaysReadable(unittest.TestCase):
         self.assertIn("not a scanvault note", before)
 
 
+class TestOnlyFiltersTheSource(unittest.TestCase):
+    """`--only` on a folder that is not an inbox."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.desktop = self.root / "Desktop"
+        self.desktop.mkdir()
+        make_text_pdf(self.desktop / "invoice.pdf", INVOICE)
+        (self.desktop / "Screenshot 2024-05-02 at 14.23.07.png").write_bytes(b"x")
+        (self.desktop / "company-logo.png").write_bytes(b"x")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def ingest(self, *extra: str) -> tuple[int, str]:
+        """Everything the run said, stderr included.
+
+        The junk on a Desktop is junk: a `.png` that is not an image fails OCR
+        and is reported on stderr, and whether it was looked at at all is
+        exactly what `--only` decides.
+        """
+        argv = [
+            "-q",
+            "ingest",
+            "--source",
+            str(self.desktop),
+            "--vault",
+            str(self.root / "vault"),
+            "--no-llm",
+            *extra,
+        ]
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = main(argv)
+        return code, out.getvalue() + err.getvalue()
+
+    @unittest.skipUnless(HAS_EXTRACTOR, "needs pypdf or pdftotext")
+    def test_without_it_everything_is_offered(self):
+        out = self.ingest()[1]
+        self.assertIn("company-logo.png", out)
+
+    @unittest.skipUnless(HAS_EXTRACTOR, "needs pypdf or pdftotext")
+    def test_it_leaves_out_what_was_not_asked_for(self):
+        out = self.ingest("--only", "screenshots,pdfs")[1]
+        self.assertIn("invoice.pdf", out)
+        self.assertIn("Screenshot 2024-05-02 at 14.23.07.png", out)
+        self.assertNotIn("company-logo.png", out)
+
+    def test_finding_none_of_it_says_what_was_looked_for(self):
+        (self.desktop / "invoice.pdf").unlink()
+        (self.desktop / "Screenshot 2024-05-02 at 14.23.07.png").unlink()
+        code, out = self.ingest("--only", "screenshots,pdfs")
+        self.assertEqual(code, 0)
+        self.assertIn("No screenshots, pdfs found", out)
+
+    def test_a_value_that_is_not_a_kind_of_file_is_refused(self):
+        with self.assertRaises(SystemExit) as raised:
+            self.ingest("--only", "documents")
+        self.assertIn("documents", str(raised.exception))
+        self.assertIn("screenshots", str(raised.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
