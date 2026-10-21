@@ -15,7 +15,7 @@ from typing import Any
 
 from .classify import classify, resolve_date
 from .config import Config
-from .llm import OllamaClient
+from .llm import LlmClient
 
 CORPUS = Path(__file__).resolve().parent.parent / "tests" / "corpus" / "documents.json"
 
@@ -121,7 +121,7 @@ def load_corpus(path: Path | None = None) -> list[dict[str, Any]]:
 
 def evaluate(
     config: Config,
-    client: OllamaClient | None = None,
+    client: LlmClient | None = None,
     corpus: list[dict[str, Any]] | None = None,
 ) -> Score:
     """Classify every document in the corpus and score the answers."""

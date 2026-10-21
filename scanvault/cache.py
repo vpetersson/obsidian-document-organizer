@@ -39,7 +39,7 @@ class ClassificationCache:
         # of that flag is to ask again. Writing stays on, so the new answers are
         # the ones the next run reuses.
         self.read = read
-        self.model = config.llm.model
+        self.model = config.llm.model_name
         self.categories = list(config.categories)
         self.language_hint = config.language_hint
         self.entries: dict[str, dict[str, Any]] = {}

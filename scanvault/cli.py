@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 from . import __version__
-from .config import CONFIG_FILENAME, Config, find_config, load_config
+from .config import CONFIG_FILENAME, LLM_PROVIDERS, Config, find_config, load_config
 from .extract import (
     _image_converter,
     available_backend,
@@ -18,7 +18,8 @@ from .extract import (
     missing_language_packs,
     pdf_text,
 )
-from .llm import LlmError, OllamaClient, is_local_host
+from .apple import AppleClient
+from .llm import LlmClient, LlmError, is_local_host, make_client
 from .organizer import apply as organizer_apply
 from .organizer import plan as organizer_plan
 from .evaluate import evaluate, load_corpus
@@ -70,6 +71,7 @@ fallbacks = ["filename", "pdf-metadata", "file-created"]
 screenshot_capture_time = true
 
 [llm]
+provider = "ollama"     # ollama | apple (Apple Intelligence's on-device model, macOS 26+)
 workers = 4             # documents classified at once; see OLLAMA_NUM_PARALLEL
 host = "http://localhost:11434"   # any ollama endpoint; the default keeps everything local
 model = "qwen3.5:9b"
@@ -155,6 +157,8 @@ def _build_config(args: argparse.Namespace) -> Config:
         overrides["llm.model"] = args.model
     if getattr(args, "workers", None):
         overrides["llm.workers"] = args.workers
+    if getattr(args, "provider", None):
+        overrides["llm.provider"] = args.provider
     if getattr(args, "ollama_host", None):
         overrides["llm.host"] = args.ollama_host
     if getattr(args, "lang", None):
@@ -174,11 +178,19 @@ def _build_config(args: argparse.Namespace) -> Config:
     return config
 
 
-def _client(args: argparse.Namespace, config: Config) -> OllamaClient | None:
+def _client(args: argparse.Namespace, config: Config) -> LlmClient | None:
     if getattr(args, "no_llm", False):
         log.info("--no-llm: using heuristic classification")
         return None
-    client = OllamaClient(config.llm)
+    client = make_client(config.llm)
+    if isinstance(client, AppleClient):
+        reason = client.unavailable_reason()
+        if reason is None:
+            return client
+        if not config.llm.fallback_to_heuristics:
+            raise SystemExit(f"the Apple on-device model is not available: {reason}")
+        log.warning("the Apple on-device model is not available (%s); using heuristics", reason)
+        return None
     if not client.available():
         if not config.llm.fallback_to_heuristics:
             raise SystemExit(f"ollama is not reachable at {config.llm.host}")
@@ -468,7 +480,7 @@ def cmd_eval(args: argparse.Namespace) -> int:
     client = _client(args, config)
     corpus = load_corpus(Path(args.corpus).expanduser()) if args.corpus else None
     score = evaluate(config, client, corpus)
-    print(f"model: {'none - rules and heuristics only' if client is None else config.llm.model}")
+    print(f"model: {'none - rules and heuristics only' if client is None else config.llm.model_name}")
     print(score.report())
     return 0
 
@@ -509,35 +521,33 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except ImportError:
         print("pypdf       : not installed (optional, falls back to pdftotext)")
 
-    client = OllamaClient(config.llm)
+    client = make_client(config.llm)
     print(f"workers      : {resolve_workers(config.llm.workers)} classified at once")
-    where = (
-        "this machine"
-        if is_local_host(config.llm.host)
-        else "not this machine - document text is sent there"
-    )
-    print(f"model host  : {config.llm.host} ({where})")
-    try:
-        models = client.list_models()
-        print(f"ollama      : reachable at {config.llm.host} ({len(models)} models)")
-        print(f"model       : {config.llm.model} {'OK' if client.has_model() else 'NOT PULLED'}")
-        if not client.has_model():
-            print(f"              run: ollama pull {config.llm.model}")
+    if isinstance(client, AppleClient):
+        print("model host  : this machine (Apple Intelligence, on-device)")
+        reason = client.unavailable_reason()
+        print(f"model       : {config.llm.model_name} {'OK' if reason is None else 'UNAVAILABLE'}")
+        if reason is not None:
+            print(f"              {reason}")
         else:
-            # A reachable model that answers with nothing usable is the failure
-            # that otherwise only shows up hundreds of documents into a run.
-            print("generation  : asking the model for one JSON object...", flush=True)
-            try:
-                reply = client.chat_json(
-                    "You reply with JSON and nothing else.",
-                    'Return exactly {"ok": true} and nothing else.',
-                )
-                print(f"              {'OK' if reply.get('ok') else f'unexpected reply: {reply}'}")
-                _report_concurrency(client, resolve_workers(config.llm.workers))
-            except LlmError as exc:
-                print(f"              FAILED: {exc}")
-    except LlmError as exc:
-        print(f"ollama      : {exc}")
+            _check_generation(client, config)
+    else:
+        where = (
+            "this machine"
+            if is_local_host(config.llm.host)
+            else "not this machine - document text is sent there"
+        )
+        print(f"model host  : {config.llm.host} ({where})")
+        try:
+            models = client.list_models()
+            print(f"ollama      : reachable at {config.llm.host} ({len(models)} models)")
+            print(f"model       : {config.llm.model} {'OK' if client.has_model() else 'NOT PULLED'}")
+            if not client.has_model():
+                print(f"              run: ollama pull {config.llm.model}")
+            else:
+                _check_generation(client, config)
+        except LlmError as exc:
+            print(f"ollama      : {exc}")
 
     if config.vault_dir:
         print(f"vault       : {config.vault_dir} {'(exists)' if config.vault_dir.exists() else '(will be created)'}")
@@ -545,6 +555,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if config.source_dir:
         print(f"source      : {config.source_dir} {'(exists)' if config.source_dir.exists() else '(MISSING)'}")
     return 0
+
+
+def _check_generation(client: LlmClient, config: Config) -> None:
+    """A reachable model that answers with nothing usable is the failure that
+    otherwise only shows up hundreds of documents into a run."""
+    print("generation  : asking the model for one JSON object...", flush=True)
+    try:
+        reply = client.chat_json(
+            "You reply with JSON and nothing else.",
+            'Return exactly {"ok": true} and nothing else.',
+        )
+        print(f"              {'OK' if reply.get('ok') else f'unexpected reply: {reply}'}")
+        if isinstance(client, AppleClient):
+            # Measured: four at once take ~3.6x one. scanvault queues them
+            # itself, so there is nothing to tune and nothing to time.
+            print(
+                "concurrency : the on-device model answers one document at a time;"
+                " the workers still OCR in parallel"
+            )
+        else:
+            _report_concurrency(client, resolve_workers(config.llm.workers))
+    except LlmError as exc:
+        print(f"              FAILED: {exc}")
 
 
 def _report_snippet(vault: Vault) -> None:
@@ -570,7 +603,7 @@ def _report_snippet(vault: Vault) -> None:
         )
 
 
-def _report_concurrency(client: OllamaClient, workers: int) -> None:
+def _report_concurrency(client: LlmClient, workers: int) -> None:
     """Ask the model server whether it really answers more than one at a time.
 
     This is the question behind "why is it still sequential?" - scanvault can
@@ -668,6 +701,12 @@ def build_parser() -> argparse.ArgumentParser:
             type=int,
             help="documents classified at once (default: 4; ollama's "
             "OLLAMA_NUM_PARALLEL has to allow it too)",
+        )
+        sp.add_argument(
+            "--provider",
+            choices=LLM_PROVIDERS,
+            help="who classifies: ollama (default) or apple, the on-device "
+            "Apple Intelligence model on macOS 26+",
         )
         sp.add_argument("--model", help="ollama model tag (default: qwen3.5:9b)")
         sp.add_argument("--ollama-host", help="ollama base URL")
@@ -810,10 +849,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_tags.set_defaults(func=cmd_tags)
 
     p_doctor = sub.add_parser(
-        "doctor", help="check OCR backends, ollama and the model", parents=[verbosity]
+        "doctor", help="check OCR backends and the model", parents=[verbosity]
     )
     p_doctor.add_argument("--vault")
     p_doctor.add_argument("--source")
+    p_doctor.add_argument("--provider", choices=LLM_PROVIDERS)
     p_doctor.add_argument("--model")
     p_doctor.add_argument("--ollama-host")
     p_doctor.set_defaults(func=cmd_doctor)

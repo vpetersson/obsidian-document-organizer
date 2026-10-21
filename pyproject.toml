@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "scanvault"
-version = "0.23.0"
-description = "OCR scanned PDFs and organize them into an Obsidian vault with ollama + Qwen"
+version = "0.24.0"
+description = "OCR scanned PDFs and organize them into an Obsidian vault with ollama or Apple Intelligence"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -16,6 +16,10 @@ dependencies = []
 fast = [
     "fonttools>=4.66.1",
     "pypdf[crypto]>=6.20.0",
+]
+# Apple Intelligence's on-device model (`provider = "apple"`); macOS 26+ only.
+apple = [
+    "apple-fm-sdk>=0.2.1; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

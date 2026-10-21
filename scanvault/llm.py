@@ -1,4 +1,4 @@
-"""Minimal ollama client (stdlib only) with structured-output support."""
+"""Model clients with structured-output support: ollama (stdlib only) and Apple's."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Protocol
 
 from .config import LlmConfig
 
@@ -17,7 +17,36 @@ log = logging.getLogger(__name__)
 
 
 class LlmError(RuntimeError):
-    """Raised when ollama is unreachable or returns something unusable."""
+    """Raised when the model is unreachable or returns something unusable."""
+
+
+class LlmClient(Protocol):
+    """What the classifier needs from a model, whichever provider runs it."""
+
+    config: LlmConfig
+
+    def available(self) -> bool: ...
+
+    def has_model(self) -> bool: ...
+
+    def list_models(self) -> list[str]: ...
+
+    def chat_json(
+        self,
+        system: str,
+        user: str,
+        schema: dict[str, Any] | None = None,
+        images: list[str] | None = None,
+    ) -> dict[str, Any]: ...
+
+
+def make_client(config: LlmConfig) -> LlmClient:
+    """The client for `config.provider`."""
+    if config.provider == "apple":
+        from .apple import AppleClient
+
+        return AppleClient(config)
+    return OllamaClient(config)
 
 
 def is_local_host(url: str) -> bool:
@@ -151,10 +180,91 @@ def parse_json_object(content: str) -> dict[str, Any]:
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end <= start:
             raise LlmError(f"model did not return JSON: {content[:200]!r}") from None
-        try:
-            parsed = json.loads(text[start : end + 1])
-        except json.JSONDecodeError as exc:
-            raise LlmError(f"model returned malformed JSON: {exc}") from exc
+        parsed = _loads_repaired(text[start : end + 1])
     if not isinstance(parsed, dict):
         raise LlmError(f"expected a JSON object, got {type(parsed).__name__}")
     return parsed
+
+
+# How many slips one answer may have before it is not worth repairing.
+MAX_REPAIRS = 20
+
+
+def _loads_repaired(text: str) -> Any:
+    """json.loads, mending the slips small models make when writing JSON by hand.
+
+    Each one shows up as "Expecting ',' delimiter" right after a value:
+
+    * a quote inside a string that was not escaped - `"says "pay now" by"`;
+    * a bare value that is not JSON - `"amount": 512.00 GBP`, `"date": 2024-03-01`;
+    * a missing comma between two members;
+    * a bracket closed with the wrong kind, or never closed - `["a", "b"}`.
+    """
+    for _ in range(MAX_REPAIRS):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            if not exc.msg.startswith("Expecting ',' delimiter"):
+                raise LlmError(f"model returned malformed JSON: {exc}{_context(text, exc.pos)}") from exc
+            try:
+                mended = _mend(text, exc.pos)
+            except Exception:  # a repair that trips over itself is just a failed repair
+                log.debug("could not mend JSON at %d", exc.pos, exc_info=True)
+                mended = None
+            if mended is None:
+                raise LlmError(f"model returned malformed JSON: {exc}{_context(text, exc.pos)}") from exc
+            text = mended
+    raise LlmError(f"model returned malformed JSON: more than {MAX_REPAIRS} errors")
+
+
+def _mend(text: str, pos: int) -> str | None:
+    if pos >= len(text) or text[pos] in "}]":
+        # The text ran out, or closed something else than what is open:
+        # close what is open.
+        missing = _open_brackets(text[:pos])
+        if not missing:
+            return None
+        return text[:pos] + missing[-1] + text[pos:]
+    before = text[:pos].rstrip()
+    if text[pos] == '"' and before.endswith(('"', "]", "}", "e", "l")) or (
+        text[pos] == '"' and before[-1:].isdigit()
+    ):
+        return text[:pos] + ", " + text[pos:]
+    if before.endswith('"'):
+        # The string ended too early: the quote that closed it was inside it.
+        quote = len(before) - 1
+        return text[:quote] + '\\"' + text[quote + 1 :]
+    colon = before.rfind(":")
+    if colon != -1 and '"' not in before[colon:]:
+        # A bare value: quote everything up to the end of the member.
+        stop = colon + 1
+        while stop < len(text) and text[stop] not in ",}]\n":
+            stop += 1
+        value = text[colon + 1 : stop].strip()
+        return text[: colon + 1] + " " + json.dumps(value) + text[stop:]
+    return None
+
+
+def _open_brackets(text: str) -> str:
+    """The closers for whatever is still open at the end of `text`, innermost last."""
+    closers: list[str] = []
+    in_string = escaped = False
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char in "{[":
+            closers.append("}" if char == "{" else "]")
+        elif char in "}]" and closers:
+            closers.pop()
+    return "".join(closers)
+
+
+def _context(text: str, pos: int) -> str:
+    return f" near {text[max(0, pos - 60) : pos + 30]!r}"

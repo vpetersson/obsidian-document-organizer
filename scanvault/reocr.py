@@ -42,7 +42,7 @@ from .extract import (
     page_count,
     pdf_text,
 )
-from .llm import OllamaClient
+from .llm import LlmClient
 from .organizer import (
     Action,
     attachment_path,
@@ -388,7 +388,7 @@ def read_again(
 def apply(
     report: ReocrReport,
     config: Config,
-    client: OllamaClient | None = None,
+    client: LlmClient | None = None,
     reclassify: bool = True,
     use_state: bool = True,
     cache: ClassificationCache | None = None,
@@ -463,7 +463,7 @@ def _decide_metadata(
     best: Attempt,
     vault: Vault,
     config: Config,
-    client: OllamaClient | None,
+    client: LlmClient | None,
     reclassify: bool,
     cache: ClassificationCache | None,
     ledger: TagLedger | None,

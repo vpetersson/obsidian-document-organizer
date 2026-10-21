@@ -424,8 +424,17 @@ class TagConfig:
         return merged
 
 
+# What `provider = "apple"` classifies with. There is one on-device model, so
+# `model` does not apply; this is the name the cache and reports use for it.
+APPLE_MODEL = "apple-foundation-model"
+LLM_PROVIDERS = ("ollama", "apple")
+
+
 @dataclass
 class LlmConfig:
+    # "ollama" talks to `host`; "apple" runs Apple Intelligence's on-device
+    # model through the Foundation Models framework (macOS 26+, Apple silicon).
+    provider: str = "ollama"
     host: str = "http://localhost:11434"
     model: str = "qwen3.5:9b"
     # Fall back to heuristics instead of failing when ollama is unreachable.
@@ -442,6 +451,11 @@ class LlmConfig:
     # Documents classified at once. The model server has to allow it too:
     # ollama caps concurrent requests with OLLAMA_NUM_PARALLEL.
     workers: int = 4
+
+    @property
+    def model_name(self) -> str:
+        """The model that actually answers, whichever provider it runs under."""
+        return APPLE_MODEL if self.provider == "apple" else self.model
 
 
 @dataclass
@@ -583,6 +597,10 @@ def load_config(path: Path | None = None, overrides: dict[str, Any] | None = Non
             _apply(getattr(config, section_name), {leaf: value}, f"{section_name}.")
         else:
             _apply(config, {key: value}, "")
+    if config.llm.provider not in LLM_PROVIDERS:
+        raise ValueError(
+            f"unknown llm.provider {config.llm.provider!r}; use one of: {', '.join(LLM_PROVIDERS)}"
+        )
     return config
 
 
