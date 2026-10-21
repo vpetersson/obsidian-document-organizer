@@ -94,6 +94,8 @@ class TestLlmParsing(unittest.TestCase):
             '{"amount": 512.00 GBP, "title": "Premium"}': {"amount": "512.00 GBP", "title": "Premium"},
             '{"document_date": 2024-03-01}': {"document_date": "2024-03-01"},
             '{"title": "A" "category": "Invoices"}': {"title": "A", "category": "Invoices"},
+            '{"a": {"b": 1}': {"a": {"b": 1}},
+            '{"title": "x", "tags": ["a", "b"}': {"title": "x", "tags": ["a", "b"]},
             '{"tags": ["a", "b"] "title": "T", "confidence": 0.9 "x": null "y": true}': {
                 "tags": ["a", "b"],
                 "title": "T",
@@ -108,7 +110,7 @@ class TestLlmParsing(unittest.TestCase):
 
     def test_unmendable_json_says_where_it_broke(self):
         with self.assertRaises(LlmError) as caught:
-            parse_json_object('{"title": "A", "tags": [1, 2}')
+            parse_json_object('{"title": "A", "tags": [1, , 2]}')
         self.assertIn("near", str(caught.exception))
 
     def test_rejects_non_objects(self):
