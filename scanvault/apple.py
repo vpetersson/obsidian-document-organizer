@@ -12,12 +12,19 @@ import asyncio
 import importlib
 import json
 import logging
+import threading
 from typing import Any
 
 from .config import APPLE_MODEL, LlmConfig
 from .llm import LlmError, parse_json_object
 
 log = logging.getLogger(__name__)
+
+# The on-device model answers one request at a time: four sent together take
+# about four times as long as one. Queue them here rather than inside the
+# framework, so a request's timeout only starts once it is actually running,
+# while the workers carry on with OCR in parallel.
+MODEL_LOCK = threading.Lock()
 
 SDK_MODULE = "apple_fm_sdk"
 
@@ -118,8 +125,8 @@ class AppleClient:
         fm = self._sdk()
 
         async def run() -> Any:
-            # A session keeps a transcript; one per request keeps every document
-            # independent and lets the workers run side by side.
+            # A session keeps a transcript; one per request keeps every
+            # document independent of the ones before it.
             session = fm.LanguageModelSession(instructions=system, model=self._model())
             if schema is None:
                 return await session.respond(user, options=self._options())
@@ -128,7 +135,8 @@ class AppleClient:
             )
 
         try:
-            return asyncio.run(asyncio.wait_for(run(), timeout=self.config.timeout))
+            with MODEL_LOCK:
+                return asyncio.run(asyncio.wait_for(run(), timeout=self.config.timeout))
         except TimeoutError as exc:
             raise LlmError(f"the on-device model did not answer in {self.config.timeout}s") from exc
 

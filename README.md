@@ -171,10 +171,12 @@ What to expect:
   your own content. If it still declines a document, that document falls back
   to heuristics like any other model failure, and `organize` picks it up again
   later.
+* It answers one document at a time — four requests sent together take about
+  four times as long as one. scanvault queues them itself, so leave `--workers`
+  alone: the workers still read and OCR documents in parallel while the model
+  works through them.
 * `scanvault doctor` says why the model is unavailable when it is (Apple
-  Intelligence off, an ineligible Mac, the model still downloading), and times
-  whether it answers more than one request at a time. If it does not, use
-  `--workers 1`.
+  Intelligence off, an ineligible Mac, the model still downloading).
 
 Then check everything is wired up:
 

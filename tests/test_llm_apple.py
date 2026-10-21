@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import json
 import sys
@@ -84,6 +85,15 @@ def fake_sdk(state: dict) -> types.ModuleType:
             self.instructions = instructions
 
         async def respond(self, prompt, *, json_schema=None, options=None):
+            state["active"] = state.get("active", 0) + 1
+            state["peak"] = max(state.get("peak", 0), state["active"])
+            try:
+                await asyncio.sleep(state.get("delay", 0))
+                return self._reply(prompt, json_schema, options)
+            finally:
+                state["active"] -= 1
+
+        def _reply(self, prompt, json_schema, options):
             state.setdefault("requests", []).append(
                 {
                     "instructions": self.instructions,
@@ -175,6 +185,16 @@ class TestAppleClient(unittest.TestCase):
         self.state["replies"] = ["  "]
         with self.assertRaises(LlmError):
             self.client().chat_json("s", "u")
+
+    def test_requests_reach_the_model_one_at_a_time(self):
+        from scanvault.parallel import parallel_map
+
+        self.state["delay"] = 0.02
+        self.state["replies"] = ['{"ok": true}'] * 4
+        client = self.client()
+        results = parallel_map(lambda _: client.chat_json("s", "u"), range(4), 4)
+        self.assertEqual(len(list(results)), 4)
+        self.assertEqual(self.state["peak"], 1)
 
     def test_images_are_refused(self):
         with self.assertRaises(LlmError):
@@ -290,6 +310,8 @@ class TestCli(unittest.TestCase):
         self.assertIn("this machine (Apple Intelligence, on-device)", out)
         self.assertIn(f"model       : {APPLE_MODEL} OK", out)
         self.assertNotIn("ollama      :", out)
+        self.assertIn("one document at a time", out)
+        self.assertNotIn("--workers 1", out)
 
     def test_doctor_says_why_the_model_is_unavailable(self):
         Reason = self.fm.SystemLanguageModelUnavailableReason

@@ -567,7 +567,15 @@ def _check_generation(client: LlmClient, config: Config) -> None:
             'Return exactly {"ok": true} and nothing else.',
         )
         print(f"              {'OK' if reply.get('ok') else f'unexpected reply: {reply}'}")
-        _report_concurrency(client, resolve_workers(config.llm.workers), config.llm.provider)
+        if isinstance(client, AppleClient):
+            # Measured: four at once take ~3.6x one. scanvault queues them
+            # itself, so there is nothing to tune and nothing to time.
+            print(
+                "concurrency : the on-device model answers one document at a time;"
+                " the workers still OCR in parallel"
+            )
+        else:
+            _report_concurrency(client, resolve_workers(config.llm.workers))
     except LlmError as exc:
         print(f"              FAILED: {exc}")
 
@@ -595,7 +603,7 @@ def _report_snippet(vault: Vault) -> None:
         )
 
 
-def _report_concurrency(client: LlmClient, workers: int, provider: str = "ollama") -> None:
+def _report_concurrency(client: LlmClient, workers: int) -> None:
     """Ask the model server whether it really answers more than one at a time.
 
     This is the question behind "why is it still sequential?" - scanvault can
@@ -630,17 +638,14 @@ def _report_concurrency(client: LlmClient, workers: int, provider: str = "ollama
     if ratio < workers * 0.6:
         print(
             f"              {workers} at once took {ratio:.1f}x a single request "
-            f"- the model is answering them in parallel"
+            f"- your ollama is answering them in parallel"
         )
     else:
         print(
             f"              {workers} at once took {ratio:.1f}x a single request "
             f"- they are being queued, not run in parallel"
         )
-        if provider == "apple":
-            print("              the on-device model takes one at a time; try: --workers 1")
-        else:
-            print(f"              try: OLLAMA_NUM_PARALLEL={workers} ollama serve")
+        print(f"              try: OLLAMA_NUM_PARALLEL={workers} ollama serve")
 
 
 def cmd_init_config(args: argparse.Namespace) -> int:
