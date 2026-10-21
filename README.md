@@ -6,7 +6,7 @@ Private document management for scanned paper. Point it at the folder your
 scanner writes to and it gives you an organized Obsidian vault of searchable PDFs
 and notes. **All of it can run on your own machine** — OCR is local software and
 the classifier is [ollama](https://ollama.com), pointed at `localhost` by
-default. No account, no cloud service, no telemetry, and your documents stay
+default — or, on a Mac, Apple Intelligence's on-device model. No account, no cloud service, no telemetry, and your documents stay
 files you own in a folder you chose. The package and CLI are called `scanvault`.
 
 * **Phase 1 — OCR.** Every incoming PDF is checked for a text layer; image-only
@@ -14,7 +14,8 @@ files you own in a folder you chose. The package and CLI are called `scanvault`.
   `.jpg`, `.png`, `.tiff`, `.heic` and friends — are converted to a searchable
   PDF the same way, so a picture of a receipt is a document like any other.
 * **Phase 2 — Organize.** The text goes to a local ollama
-  model (default `qwen3.5:9b`), which returns a title, category, date,
+  model (default `qwen3.5:9b`) or to Apple's on-device model
+  ([`provider = "apple"`](#apple-intelligence-instead-of-ollama)), which returns a title, category, date,
   correspondent, tags and a summary. scanvault writes an Obsidian note with that
   metadata as YAML frontmatter and files both the note and the PDF into a dated
   folder structure.
@@ -57,6 +58,10 @@ tells you which it is:
 ```
 model host  : http://localhost:11434 (this machine)
 ```
+
+With `provider = "apple"` there is no request at all: the text goes to the model
+built into macOS through Apple's Foundation Models framework, and it is answered on
+the machine — `doctor` says `this machine (Apple Intelligence, on-device)`.
 
 Nothing else phones anywhere. No analytics, no update check, no crash reporting,
 no account — not the PDFs, not the OCR text, not the metadata.
@@ -131,6 +136,46 @@ brew install ocrmypdf poppler
 ollama pull qwen3.5:9b
 ```
 
+### Apple Intelligence instead of ollama
+
+On a Mac with Apple silicon, macOS 26 or later and Apple Intelligence switched on,
+the model that ships with the OS can do the classifying, and there is nothing to
+pull or serve. It goes through Apple's
+[Foundation Models framework](https://developer.apple.com/foundation-models-framework/)
+and its Python binding, `apple-fm-sdk`, which is built from source on install
+and needs Xcode:
+
+```bash
+uv sync --extra apple
+scanvault doctor --provider apple
+scanvault ingest --source ~/Scans/inbox --vault ~/Obsidian/Archive --provider apple
+```
+
+Or set it once in the config:
+
+```toml
+[llm]
+provider = "apple"
+```
+
+What to expect:
+
+* It is a small model (about 3B parameters) with a 4,096-token context window,
+  shared between the instructions, the category list, the document and the
+  answer. The default `max_chars = 3000` fits; a document that does not is
+  classified by heuristics and the warning says to lower `llm.max_chars`.
+* Its answers are constrained to the same JSON schema ollama gets, through the
+  framework's guided generation. `model`, `host`, `num_ctx` and `keep_alive`
+  are ollama settings and are ignored.
+* It runs with Apple's permissive guardrails, the setting meant for working on
+  your own content. If it still declines a document, that document falls back
+  to heuristics like any other model failure, and `organize` picks it up again
+  later.
+* `scanvault doctor` says why the model is unavailable when it is (Apple
+  Intelligence off, an ineligible Mac, the model still downloading), and times
+  whether it answers more than one request at a time. If it does not, use
+  `--workers 1`.
+
 Then check everything is wired up:
 
 ```bash
@@ -200,6 +245,7 @@ Every command that writes takes `--apply` and `--dry-run`; `-v`/`--verbose` and
 | --- | --- | --- |
 | `--source`, `--vault` | ingest, watch | folders to read from and write to |
 | `--workers N` | ingest, watch, organize, re-ocr, eval | documents in flight at once |
+| `--provider ollama\|apple` | all of the above | who classifies: ollama, or Apple's on-device model |
 | `--model`, `--ollama-host` | all of the above | which model, and where it runs |
 | `--no-llm` | all of the above | skip the model, use rules and heuristics |
 | `--lang eng+swe` | ingest, watch, ocr, re-ocr | OCR languages, main one first |
@@ -1154,6 +1200,7 @@ good_enough = 0.7                  # stop escalating passes once one reaches thi
 # passes = ["force", "oversample", "clean"]   # drop "clean" if unpaper is not installed
 
 [llm]
+provider = "ollama"                # ollama | apple (Apple Intelligence, on-device, macOS 26+)
 host = "http://localhost:11434"   # any ollama endpoint; the default keeps it all local
 model = "qwen3.5:9b"
 num_ctx = 8192
@@ -1195,7 +1242,8 @@ to match it.
 
 ### Degraded modes
 
-If ollama is unreachable (or you pass `--no-llm`), documents are still filed
+If ollama is unreachable, the Apple model is unavailable, or you pass
+`--no-llm`, documents are still filed
 using keyword heuristics and marked `classifier: "heuristic"`. `organize` treats
 those notes as incomplete, so re-running it once ollama is back reclassifies them
 properly. Set `fallback_to_heuristics = false` to fail loudly instead.
@@ -1244,7 +1292,7 @@ and `poppler-utils` installed — so the OCR tests really execute there instead 
 skipping.
 
 The suite is stdlib-only. It builds real PDFs on the fly and stubs the ollama
-client, so it needs neither a model nor an OCR engine; tests that need a PDF text
+client and Apple's SDK, so it needs neither a model nor an OCR engine; tests that need a PDF text
 extractor skip themselves if neither `pypdf` nor `pdftotext` is present.
 
 ## Troubleshooting
@@ -1308,6 +1356,9 @@ have silence.
   attachment path.
 * The model tag defaults to `qwen3.5:9b`. Use `--model` (or `[llm] model`) for
   any other ollama tag or a local Modelfile build.
+* `provider = "apple"` classifies text only, and the cache keys on the provider's
+  model, so switching between ollama and Apple asks again rather than reusing
+  the other model's answers.
 * Classification quality depends on OCR quality. `scanvault ocr --text-out --apply` is
   the quickest way to see what the model actually gets, and `scanvault re-ocr`
   finds the documents where it got nonsense.

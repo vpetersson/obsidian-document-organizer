@@ -1,4 +1,4 @@
-"""Minimal ollama client (stdlib only) with structured-output support."""
+"""Model clients with structured-output support: ollama (stdlib only) and Apple's."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, Protocol
 
 from .config import LlmConfig
 
@@ -17,7 +17,36 @@ log = logging.getLogger(__name__)
 
 
 class LlmError(RuntimeError):
-    """Raised when ollama is unreachable or returns something unusable."""
+    """Raised when the model is unreachable or returns something unusable."""
+
+
+class LlmClient(Protocol):
+    """What the classifier needs from a model, whichever provider runs it."""
+
+    config: LlmConfig
+
+    def available(self) -> bool: ...
+
+    def has_model(self) -> bool: ...
+
+    def list_models(self) -> list[str]: ...
+
+    def chat_json(
+        self,
+        system: str,
+        user: str,
+        schema: dict[str, Any] | None = None,
+        images: list[str] | None = None,
+    ) -> dict[str, Any]: ...
+
+
+def make_client(config: LlmConfig) -> LlmClient:
+    """The client for `config.provider`."""
+    if config.provider == "apple":
+        from .apple import AppleClient
+
+        return AppleClient(config)
+    return OllamaClient(config)
 
 
 def is_local_host(url: str) -> bool:

@@ -20,7 +20,7 @@ from .parallel import Progress, parallel_map, pipeline as run_pipeline, resolve_
 from .classify import DocumentMeta, classify, resolve_date
 from .config import BUCKETS, Config
 from .extract import OcrError, available_backend, extract, is_image, needs_password, pdf_text
-from .llm import OllamaClient
+from .llm import LlmClient
 from .quality import score_text
 from .pipeline import (
     Prepared,
@@ -290,7 +290,7 @@ def needs_classification(frontmatter: dict[str, Any]) -> bool:
 
 def plan(
     config: Config,
-    client: OllamaClient | None = None,
+    client: LlmClient | None = None,
     reclassify: bool = False,
     adopt: bool = True,
     include_unmanaged: bool = False,
@@ -546,7 +546,7 @@ def _run_ocr(
     vault: Vault,
     action: Action,
     config: Config,
-    client: OllamaClient | None,
+    client: LlmClient | None,
     cache: ClassificationCache | None = None,
     ledger: TagLedger | None = None,
 ) -> None:
@@ -637,7 +637,7 @@ def _rewrite_note(
 def apply(
     report: OrganizeReport,
     config: Config,
-    client: OllamaClient | None = None,
+    client: LlmClient | None = None,
     use_state: bool = True,
     cache: ClassificationCache | None = None,
     use_cache: bool = True,

@@ -15,7 +15,7 @@ from .cache import ClassificationCache
 from .config import GENERIC_CATEGORIES, WEAK_TAGS, Config
 from .dates import date_from_text, find_dates, strong_date
 from .extract import pdf_creation_date
-from .llm import LlmError, OllamaClient
+from .llm import LlmClient, LlmError
 from .select import read_screenshot_name, screenshot_names
 from .tags import TagLedger
 from .util import (
@@ -673,7 +673,7 @@ def filename_title(source: Path | None, config: Config) -> str:
 def classify(
     text: str,
     config: Config,
-    client: OllamaClient | None,
+    client: LlmClient | None,
     source: Path | None = None,
     cache: ClassificationCache | None = None,
     ledger: TagLedger | None = None,

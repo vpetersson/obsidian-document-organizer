@@ -13,7 +13,7 @@ from .parallel import Progress, pipeline as run_pipeline, resolve_workers
 from .classify import DocumentMeta, classify, resolve_date
 from .config import Config
 from .extract import DOCUMENT_SUFFIXES, ExtractResult, OcrError, extract, is_image
-from .llm import OllamaClient
+from .llm import LlmClient
 from .quality import score_text
 from .select import is_screenshot, keeper, screenshot_names
 from .state import State
@@ -134,7 +134,7 @@ def tag_from_file(meta: DocumentMeta, value: str, ledger: TagLedger | None) -> N
 def prepare_document(
     path: Path,
     config: Config,
-    client: OllamaClient | None,
+    client: LlmClient | None,
     state: State | None = None,
     bucket: str | None = None,
     source_root: Path | None = None,
@@ -271,7 +271,7 @@ def process_file(
     path: Path,
     config: Config,
     vault: Vault,
-    client: OllamaClient | None,
+    client: LlmClient | None,
     state: State | None = None,
     dry_run: bool = False,
     bucket: str | None = None,
@@ -286,7 +286,7 @@ def process_file(
 def ingest(
     config: Config,
     paths: Iterable[Path] | None = None,
-    client: OllamaClient | None = None,
+    client: LlmClient | None = None,
     dry_run: bool = False,
     use_state: bool = True,
     cache: ClassificationCache | None = None,
@@ -369,7 +369,7 @@ def ingest(
 
 def watch(
     config: Config,
-    client: OllamaClient | None = None,
+    client: LlmClient | None = None,
     interval: float = 20.0,
     settle_seconds: float = 2.0,
     iterations: int | None = None,
