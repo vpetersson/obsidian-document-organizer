@@ -85,6 +85,32 @@ class TestLlmParsing(unittest.TestCase):
         self.assertEqual(parse_json_object('```json\n{"a": 2}\n```'), {"a": 2})
         self.assertEqual(parse_json_object('Sure!\n{"a": 3}\nHope that helps'), {"a": 3})
 
+    def test_the_slips_small_models_make_are_mended(self):
+        cases = {
+            '{"summary": "it says "pay now" by May", "title": "Reminder"}': {
+                "summary": 'it says "pay now" by May',
+                "title": "Reminder",
+            },
+            '{"amount": 512.00 GBP, "title": "Premium"}': {"amount": "512.00 GBP", "title": "Premium"},
+            '{"document_date": 2024-03-01}': {"document_date": "2024-03-01"},
+            '{"title": "A" "category": "Invoices"}': {"title": "A", "category": "Invoices"},
+            '{"tags": ["a", "b"] "title": "T", "confidence": 0.9 "x": null "y": true}': {
+                "tags": ["a", "b"],
+                "title": "T",
+                "confidence": 0.9,
+                "x": None,
+                "y": True,
+            },
+        }
+        for broken, expected in cases.items():
+            with self.subTest(broken):
+                self.assertEqual(parse_json_object(broken), expected)
+
+    def test_unmendable_json_says_where_it_broke(self):
+        with self.assertRaises(LlmError) as caught:
+            parse_json_object('{"title": "A", "tags": [1, 2}')
+        self.assertIn("near", str(caught.exception))
+
     def test_rejects_non_objects(self):
         with self.assertRaises(LlmError):
             parse_json_object("[1, 2]")

@@ -180,10 +180,58 @@ def parse_json_object(content: str) -> dict[str, Any]:
         start, end = text.find("{"), text.rfind("}")
         if start == -1 or end <= start:
             raise LlmError(f"model did not return JSON: {content[:200]!r}") from None
-        try:
-            parsed = json.loads(text[start : end + 1])
-        except json.JSONDecodeError as exc:
-            raise LlmError(f"model returned malformed JSON: {exc}") from exc
+        parsed = _loads_repaired(text[start : end + 1])
     if not isinstance(parsed, dict):
         raise LlmError(f"expected a JSON object, got {type(parsed).__name__}")
     return parsed
+
+
+# How many slips one answer may have before it is not worth repairing.
+MAX_REPAIRS = 20
+
+
+def _loads_repaired(text: str) -> Any:
+    """json.loads, mending the slips small models make when writing JSON by hand.
+
+    Each one shows up as "Expecting ',' delimiter" right after a value:
+
+    * a quote inside a string that was not escaped - `"says "pay now" by"`;
+    * a bare value that is not JSON - `"amount": 512.00 GBP`, `"date": 2024-03-01`;
+    * a missing comma between two members.
+    """
+    for _ in range(MAX_REPAIRS):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError as exc:
+            if not exc.msg.startswith("Expecting ',' delimiter"):
+                raise LlmError(f"model returned malformed JSON: {exc}{_context(text, exc.pos)}") from exc
+            mended = _mend(text, exc.pos)
+            if mended is None:
+                raise LlmError(f"model returned malformed JSON: {exc}{_context(text, exc.pos)}") from exc
+            text = mended
+    raise LlmError(f"model returned malformed JSON: more than {MAX_REPAIRS} errors")
+
+
+def _mend(text: str, pos: int) -> str | None:
+    before = text[:pos].rstrip()
+    if text[pos] == '"' and before.endswith(('"', "]", "}", "e", "l")) or (
+        text[pos] == '"' and before[-1:].isdigit()
+    ):
+        return text[:pos] + ", " + text[pos:]
+    if before.endswith('"'):
+        # The string ended too early: the quote that closed it was inside it.
+        quote = len(before) - 1
+        return text[:quote] + '\\"' + text[quote + 1 :]
+    colon = before.rfind(":")
+    if colon != -1 and '"' not in before[colon:]:
+        # A bare value: quote everything up to the end of the member.
+        stop = colon + 1
+        while stop < len(text) and text[stop] not in ",}]\n":
+            stop += 1
+        value = text[colon + 1 : stop].strip()
+        return text[: colon + 1] + " " + json.dumps(value) + text[stop:]
+    return None
+
+
+def _context(text: str, pos: int) -> str:
+    return f" near {text[max(0, pos - 60) : pos + 30]!r}"
