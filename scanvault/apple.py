@@ -84,7 +84,8 @@ class AppleClient:
         fm = self._sdk()
         # Scanned paperwork is medical letters, debts, court papers. The
         # permissive guardrails are the ones Apple provides for working on the
-        # user's own content rather than generating new content.
+        # user's own content rather than generating new content - but they
+        # only cover text responses; see chat_json.
         return fm.SystemLanguageModel(
             guardrails=fm.SystemLanguageModelGuardrails.PERMISSIVE_CONTENT_TRANSFORMATIONS
         )
@@ -152,16 +153,7 @@ class AppleClient:
             raise LlmError("the apple provider does not take images")
         fm = self._sdk()
         try:
-            try:
-                result = self._respond(system, user, schema)
-            except (fm.InvalidGenerationSchemaError, fm.UnsupportedGuideError) as exc:
-                if schema is None:
-                    raise
-                # Not every JSON Schema keyword has a guided-generation guide.
-                log.warning(
-                    "the on-device model rejected the schema (%s); retrying in plain JSON mode", exc
-                )
-                result = self._respond(system, user, None)
+            return self._chat(fm, system, user, schema)
         except fm.ExceededContextWindowSizeError as exc:
             raise LlmError(
                 "the document does not fit the on-device model's context window; "
@@ -171,7 +163,32 @@ class AppleClient:
             raise LlmError(f"the on-device model declined the document: {exc}") from exc
         except fm.FoundationModelsError as exc:
             raise LlmError(f"the on-device model failed: {type(exc).__name__}: {exc}") from exc
-        return _as_object(result)
+
+    def _chat(
+        self, fm: Any, system: str, user: str, schema: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        # Text first, with the schema spelled out in the instructions. The
+        # permissive guardrails only apply to text responses; guided generation
+        # runs under the default ones, which refused 20 of the 39 documents in
+        # the eval corpus - ordinary bills and payslips - as "likely unsafe".
+        instructions = system
+        if schema is not None:
+            instructions += (
+                "\n\nThe JSON object follows this JSON Schema; leave out or null "
+                f"anything the document does not state:\n{json.dumps(schema)}"
+            )
+        try:
+            return _as_object(self._respond(instructions, user, None))
+        except LlmError as exc:
+            if schema is None:
+                raise
+            # Guided generation cannot produce malformed JSON, so it is the
+            # fallback for an answer that did not parse.
+            log.warning("the on-device model did not answer in JSON (%s); retrying guided", exc)
+        try:
+            return _as_object(self._respond(system, user, schema))
+        except (fm.InvalidGenerationSchemaError, fm.UnsupportedGuideError) as exc:
+            raise LlmError(f"the on-device model rejected the schema: {exc}") from exc
 
 
 def _as_object(result: Any) -> dict[str, Any]:

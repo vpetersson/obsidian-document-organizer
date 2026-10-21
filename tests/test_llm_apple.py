@@ -125,24 +125,46 @@ class TestAppleClient(unittest.TestCase):
     def client(self, **overrides) -> AppleClient:
         return AppleClient(LlmConfig(provider="apple", **overrides))
 
-    def test_a_guided_response_comes_back_as_a_dict(self):
-        self.state["replies"] = [{"title": "Acme Invoice", "category": "Invoices"}]
-        schema = {
-            "type": "object",
-            "properties": {"title": {"type": "string"}, "category": {"type": "string"}},
-            "required": ["title"],
-        }
-        result = self.client().chat_json("system prompt", "user prompt", schema=schema)
+    SCHEMA = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}, "category": {"type": "string"}},
+        "required": ["title"],
+    }
+
+    def test_a_schema_request_asks_for_text_with_the_schema_in_the_instructions(self):
+        # Guided generation ignores the permissive guardrails and refused half
+        # the eval corpus; text generation is covered by them.
+        self.state["replies"] = ['{"title": "Acme Invoice", "category": "Invoices"}']
+        result = self.client().chat_json("system prompt", "user prompt", schema=self.SCHEMA)
         self.assertEqual(result, {"title": "Acme Invoice", "category": "Invoices"})
-        request = self.state["requests"][0]
-        self.assertEqual(request["instructions"], "system prompt")
+        [request] = self.state["requests"]
+        self.assertIsNone(request["json_schema"])
+        self.assertTrue(request["instructions"].startswith("system prompt"))
+        self.assertIn(json.dumps(self.SCHEMA), request["instructions"])
         self.assertEqual(request["prompt"], "user prompt")
-        self.assertEqual(request["json_schema"]["x-order"], ["title", "category"])
         self.assertEqual(request["options"].sampling.kind, "greedy", "temperature 0 is greedy")
         self.assertEqual(
             self.state["guardrails"],
             self.fm.SystemLanguageModelGuardrails.PERMISSIVE_CONTENT_TRANSFORMATIONS,
         )
+
+    def test_an_answer_that_is_not_json_is_retried_guided(self):
+        self.state["replies"] = [
+            "Sure! This looks like an invoice.",
+            {"title": "Acme Invoice", "category": "Invoices"},
+        ]
+        result = self.client().chat_json("s", "u", schema=self.SCHEMA)
+        self.assertEqual(result["title"], "Acme Invoice")
+        first, second = self.state["requests"]
+        self.assertIsNone(first["json_schema"])
+        self.assertEqual(second["instructions"], "s", "the guided retry has the schema itself")
+        self.assertEqual(second["json_schema"]["x-order"], ["title", "category"])
+
+    def test_a_refused_guided_retry_is_an_error(self):
+        self.state["replies"] = ["no", self.fm.RefusalError("likely unsafe")]
+        with self.assertRaises(LlmError) as caught:
+            self.client().chat_json("s", "u", schema=self.SCHEMA)
+        self.assertIn("declined", str(caught.exception))
 
     def test_a_nonzero_temperature_is_passed_through(self):
         self.state["replies"] = ['{"ok": true}']
@@ -156,16 +178,11 @@ class TestAppleClient(unittest.TestCase):
         self.assertEqual(self.client().chat_json("s", "u"), {"ok": True})
         self.assertIsNone(self.state["requests"][0]["json_schema"])
 
-    def test_a_rejected_schema_is_retried_in_plain_json_mode(self):
-        self.state["replies"] = [
-            self.fm.InvalidGenerationSchemaError("no guide for that"),
-            '{"title": "Recovered"}',
-        ]
-        result = self.client().chat_json("s", "u", schema={"type": "object", "properties": {}})
-        self.assertEqual(result["title"], "Recovered")
-        first, second = self.state["requests"]
-        self.assertIsNotNone(first["json_schema"])
-        self.assertIsNone(second["json_schema"], "the retry drops the schema")
+    def test_a_rejected_schema_is_an_error(self):
+        self.state["replies"] = ["not json", self.fm.InvalidGenerationSchemaError("no guide")]
+        with self.assertRaises(LlmError) as caught:
+            self.client().chat_json("s", "u", schema=self.SCHEMA)
+        self.assertIn("rejected the schema", str(caught.exception))
 
     def test_framework_errors_become_llm_errors(self):
         cases = {

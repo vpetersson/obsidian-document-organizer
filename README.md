@@ -164,13 +164,17 @@ What to expect:
   shared between the instructions, the category list, the document and the
   answer. The default `max_chars = 3000` fits; a document that does not is
   classified by heuristics and the warning says to lower `llm.max_chars`.
-* Its answers are constrained to the same JSON schema ollama gets, through the
-  framework's guided generation. `model`, `host`, `num_ctx` and `keep_alive`
-  are ollama settings and are ignored.
 * It runs with Apple's permissive guardrails, the setting meant for working on
-  your own content. If it still declines a document, that document falls back
-  to heuristics like any other model failure, and `organize` picks it up again
+  your own content. Those only cover text answers — with the framework's
+  guided (schema-constrained) generation the default guardrails apply, and they
+  turned down half the eval corpus, ordinary bills and payslips, as "likely
+  unsafe". So the model is asked for JSON as text, with the same schema ollama
+  gets written into its instructions, and guided generation is only the retry
+  for an answer that does not parse. A document it still declines falls back to
+  heuristics like any other model failure, and `organize` picks it up again
   later.
+* `model`, `host`, `num_ctx` and `keep_alive` are ollama settings and are
+  ignored.
 * It answers one document at a time — four requests sent together take about
   four times as long as one. scanvault queues them itself, so leave `--workers`
   alone: the workers still read and OCR documents in parallel while the model
