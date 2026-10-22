@@ -15,7 +15,7 @@ dependencies = []
 # pypdf gives faster, dependency-free text extraction; poppler's pdftotext is used otherwise.
 fast = [
     "fonttools>=4.67.0",
-    "pypdf[crypto]>=6.20.0",
+    "pypdf[crypto]>=6.21.1",
 ]
 # Apple Intelligence's on-device model (`provider = "apple"`); macOS 26+ only.
 apple = [
