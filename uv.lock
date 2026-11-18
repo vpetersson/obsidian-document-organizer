@@ -4,13 +4,13 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "apple-fm-sdk"
-version = "0.2.1"
+version = "0.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "build" },
     { name = "setuptools" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/02/5cfad13c6ab9acd22e81bc083789db02f3551069c10a1551ec60dd04a273/apple_fm_sdk-0.2.1.tar.gz", hash = "sha256:e1801d68ae0517f8524c31723b1dc1a662bf9d06b7a9cc765c9dddb77e647980", size = 107506, upload-time = "2026-06-29T23:30:06.383Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a1/cb/2275d00b3bcf93501e68d8a76e7783280c65f8407f58fdab674b0677823c/apple_fm_sdk-0.2.2.tar.gz", hash = "sha256:1b5e221e5fc25a424fdeaa579588b65e80d23261c82ad6c7a7734a206b14ef89", size = 112217, upload-time = "2026-11-11T00:58:02.507Z" }
 
 [[package]]
 name = "build"
@@ -308,7 +308,7 @@ fast = [
 
 [package.metadata]
 requires-dist = [
-    { name = "apple-fm-sdk", marker = "sys_platform == 'darwin' and extra == 'apple'", specifier = ">=0.2.1" },
+    { name = "apple-fm-sdk", marker = "sys_platform == 'darwin' and extra == 'apple'", specifier = ">=0.2.2" },
     { name = "fonttools", marker = "extra == 'fast'", specifier = ">=4.68.0" },
     { name = "pypdf", extras = ["crypto"], marker = "extra == 'fast'", specifier = ">=7.0.0" },
 ]
