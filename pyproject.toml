@@ -19,7 +19,7 @@ fast = [
 ]
 # Apple Intelligence's on-device model (`provider = "apple"`); macOS 26+ only.
 apple = [
-    "apple-fm-sdk>=0.2.1; sys_platform == 'darwin'",
+    "apple-fm-sdk>=0.2.2; sys_platform == 'darwin'",
 ]
 
 [project.scripts]
