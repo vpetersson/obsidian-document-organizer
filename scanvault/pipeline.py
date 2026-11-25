@@ -320,6 +320,19 @@ def ingest(
 
     report = Report()
     paths = list(paths)
+    # A document already in the vault that a note embeds is that note's scan.
+    # Filing it again would move it out from under the note - the note keeps
+    # pointing at the old path, shows "could not be found", and the document
+    # gets a second note beside it. `organize` is what files a vault's own
+    # loose documents, and it already leaves the linked ones alone.
+    paths, embedded = _without_embedded(paths, vault)
+    for path in embedded:
+        result = ProcessResult(
+            path, "skipped", error="a note in the vault embeds it; leaving it where it is"
+        )
+        report.results.append(result)
+        if on_result is not None:
+            on_result(result)
     workers = resolve_workers(config.llm.workers) if client is not None else 1
     progress = Progress(len(paths))
 
@@ -365,6 +378,25 @@ def ingest(
         if not dry_run:
             ledger.save(config.state_root)
     return report
+
+
+def _without_embedded(paths: list[Path], vault: Vault) -> tuple[list[Path], list[Path]]:
+    """Split `paths` into the ones to file and the ones a vault note embeds."""
+    root = vault.root.resolve()
+    inside = [path for path in paths if root in path.resolve().parents]
+    if not inside:
+        # The usual case - a scanner folder outside the vault - costs nothing.
+        return paths, []
+    linked = vault.linked_index()
+    embedded = [path for path in inside if vault.is_linked(path, linked)]
+    if embedded:
+        log.warning(
+            "%d document%s in %s already belong to a note; skipping them",
+            len(embedded),
+            "" if len(embedded) == 1 else "s",
+            vault.root,
+        )
+    return [path for path in paths if path not in embedded], embedded
 
 
 def watch(

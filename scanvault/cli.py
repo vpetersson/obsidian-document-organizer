@@ -27,6 +27,8 @@ from .parallel import parallel_map, resolve_workers
 from .pipeline import ingest, iter_documents, watch
 from .quality import score_text
 from .reocr import PASS_DESCRIPTIONS
+from .repair import apply as repair_apply
+from .repair import plan as repair_plan
 from .reocr import apply as reocr_apply
 from .reocr import plan as reocr_plan
 from .select import SELECTORS, describe, keeper, parse_selectors
@@ -225,6 +227,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             print(f"{'would file' if preview else 'filed'}: {result.source.name} -> {note}", flush=True)
         elif result.status == "duplicate":
             print(f"skipped (already filed): {result.source.name}", flush=True)
+        elif result.status == "skipped":
+            print(f"skipped ({result.error}): {result.source.name}", flush=True)
         else:
             print(f"FAILED: {result.source.name}: {result.error}", file=sys.stderr, flush=True)
 
@@ -238,7 +242,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         on_result=report_one,
     )
     filed = f"{report.count('ingested')} {'to file' if preview else 'filed'}"
-    print(f"\n{filed}, {report.count('duplicate')} duplicates, {report.count('failed')} failed")
+    skipped = f", {report.count('skipped')} embedded by a note" if report.count("skipped") else ""
+    print(
+        f"\n{filed}, {report.count('duplicate')} duplicates{skipped}, "
+        f"{report.count('failed')} failed"
+    )
     print_preview_trailer(preview)
     return 1 if report.failures else 0
 
@@ -412,6 +420,43 @@ def cmd_organize(args: argparse.Namespace) -> int:
         )
     print_preview_trailer(preview)
     return 1 if report.count("failed") else 0
+
+
+def cmd_repair(args: argparse.Namespace) -> int:
+    config = _build_config(args)
+    if config.vault_dir is None:
+        raise SystemExit("--vault is required")
+    preview = is_preview(args)
+    report = repair_plan(config, drop_missing=args.drop_missing)
+    if not preview:
+        repair_apply(report, config)
+
+    prefix = "[dry-run] " if preview else ""
+    for finding in report.findings:
+        print(prefix + finding.describe(config.vault_dir))
+        if finding.error:
+            print(f"  error: {finding.error}", file=sys.stderr)
+
+    verb = (lambda planned, done: planned) if preview else (lambda planned, done: done)
+    print(
+        f"\n{report.notes} notes, {report.links} document links checked: "
+        f"{report.count('relink')} {verb('to relink', 'relinked')}, "
+        f"{report.count('remove')} duplicate notes {verb('to remove', 'removed')}, "
+        f"{report.count('drop')} dead links {verb('to drop', 'dropped')}, "
+        f"{report.count('missing')} missing, {report.count('failed')} failed"
+    )
+    print(f"index: {report.index.describe()}")
+    if report.trash is not None:
+        print(f"removed notes are in {report.trash.relative_to(config.vault_dir)}")
+    if report.count("missing"):
+        print(
+            f"{report.count('missing')} links point at documents that are nowhere in the "
+            "vault; pass --drop-missing to take them out of their notes."
+        )
+    if not report.findings and not report.index:
+        print("every note's documents are where it says they are")
+    print_preview_trailer(preview and bool(report.findings or report.index))
+    return 1 if report.count("failed") or report.count("missing") else 0
 
 
 def cmd_init_vault(args: argparse.Namespace) -> int:
@@ -813,6 +858,20 @@ def build_parser() -> argparse.ArgumentParser:
     add_execution_flags(p_reocr)
     add_llm_flags(p_reocr)
     p_reocr.set_defaults(func=cmd_reocr)
+
+    p_repair = sub.add_parser(
+        "repair",
+        help="find notes whose documents could not be found, relink them and rebuild the index",
+        parents=[verbosity],
+    )
+    p_repair.add_argument("--vault", required=False)
+    p_repair.add_argument(
+        "--drop-missing",
+        action="store_true",
+        help="take links to documents that are nowhere in the vault out of their notes",
+    )
+    add_execution_flags(p_repair)
+    p_repair.set_defaults(func=cmd_repair)
 
     p_init_vault = sub.add_parser(
         "init-vault",
