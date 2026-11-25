@@ -224,6 +224,10 @@ scanvault organize --vault ~/Obsidian/Archive --reclassify --apply
 # find the documents whose OCR is gibberish, then read them again
 scanvault re-ocr --vault ~/Obsidian/Archive
 scanvault re-ocr --vault ~/Obsidian/Archive --apply
+
+# check every note's links, mend the ones that "could not be found"
+scanvault repair --vault ~/Obsidian/Archive
+scanvault repair --vault ~/Obsidian/Archive --apply
 ```
 
 `ingest` is safe to re-run: every filed document is recorded by SHA-256 in
@@ -237,6 +241,7 @@ scanvault re-ocr --vault ~/Obsidian/Archive --apply
 | `watch` | the same, polling the source folder |
 | `organize` | OCR, reclassify and re-file documents already in the vault |
 | `re-ocr` | score the OCR text in the vault and read the unreadable documents again |
+| `repair` | find notes whose documents could not be found, relink them and rebuild the index |
 | `ocr` | phase 1 only: turn scans into searchable PDFs and dump their text |
 | `init-vault` | create the folder documents are filed into, and the CSS snippet |
 | `init-config` | write a starting `scanvault.toml` |
@@ -269,6 +274,7 @@ Every command that writes takes `--apply` and `--dry-run`; `-v`/`--verbose` and
 | `--all` | re-ocr | read every document again, not only the bad ones |
 | `--limit N` | re-ocr | only the N worst-scoring documents this run |
 | `--no-reclassify` | re-ocr | keep the existing title and category |
+| `--drop-missing` | repair | take links to documents that are nowhere in the vault out of their notes |
 | `--out`, `--text-out` | ocr | where to put searchable PDFs and extracted text |
 | `--interval`, `--iterations` | watch | how often to poll, and how many times |
 | `--duplicates`, `--min-count` | tags | only tags spelled more than one way, and how rare to show |
@@ -500,6 +506,58 @@ searchable — in Obsidian *and* in the PDF itself — with:
 ```bash
 scanvault organize --vault ~/Obsidian/Archive --apply
 ```
+
+## When a note says "could not be found"
+
+A note embeds its scan by path, and Obsidian shows *"Archive/Scan 52.pdf" could
+not be found* where the scan should be once the file is no longer at that path.
+
+The usual way a vault got like that was `ingest` pointed at a folder **inside**
+the vault. A hand-written note embedding `![[Scan 52.pdf]]` is filed by
+`organize`, and its link written out as `![[Archive/Scan 52.pdf]]`. `ingest`
+then took `Scan 52.pdf` as a new scan, moved it into `_attachments/` under its
+new name and wrote a second note for it. The first note was left pointing at a
+file that was gone, and the document had two notes, one of them broken.
+
+`ingest` and `watch` no longer do that: a document inside the vault that a note
+points at is skipped, with `skipped (a note in the vault embeds it ...)`.
+Filing a vault's own loose documents is `organize`'s job, and it already leaves
+the linked ones alone. Documents outside the vault are filed as before, whatever
+they are called.
+
+`repair` mends a vault that already has broken links. It checks every document
+every note points at — `attachment:`, `original:`, embeds, wikilinks and markdown
+links — and for each one that no longer resolves it looks for where it went:
+
+* **the same file somewhere else** in the vault, moved by hand or by a sync;
+* **a note filed from a file of that name** (its `source_file`), whose text is
+  the same document. Scanners count from 1 again, so the name alone is not
+  enough: a `Scan 52.pdf` whose text is a different letter is not taken.
+
+```
+[dry-run] remove: Archive/Government/2025/2025-03-01 Water Bill.md (its scan was filed again as Archive/Government/2025/2025-03-01 Water Bill-2.md)
+[dry-run] relink: Archive/Invoices/2025/2025-04-01 Energy Invoice.md: Archive/Scan 53.pdf -> Archive/_attachments/Invoices/2025/2025-04-01 Energy Invoice.pdf (filed again as 2025-04-01 Energy Invoice-2.md; this note is a duplicate of it, with writing of its own to keep)
+[dry-run] missing: Archive/Other/2024/2024-06-02 Parking permit.md: Archive/Scan 7.pdf (nothing in the vault is this document)
+```
+
+* **relink** rewrites the link to where the document is now, in every form the
+  note used it, and touches nothing else in the note.
+* **remove** is for the stale half of a duplicate: every scan the note had is in
+  one other note now, and there is nothing in it that is not in that note too.
+  It is moved to `.scanvault/repair-trash/<time>/`, not deleted. A duplicate with
+  a line of your own in it is relinked instead, and both notes are kept.
+* **missing** is a document that is nowhere in the vault. It is reported, and
+  the command exits 1 so a script notices; `--drop-missing` takes the dead link
+  out of the note and keeps the rest of it — the title, the summary and the
+  text.
+
+Then `.scanvault/index.json` is rebuilt from the notes: entries for notes that
+are gone are dropped, entries for notes that moved are pointed at them, and
+notes the index lost track of are added back. A stale entry is what makes
+`ingest` say "already filed" about a document that is not in the vault any more.
+
+Run it without `--apply` first, as everywhere else. A second run that finds
+nothing says `every note's documents are where it says they are`.
 
 ## When the OCR came out as gibberish
 
@@ -1354,6 +1412,11 @@ planning logs `scanning N notes`, then `[i/N] classifying <note>` for every note
 it sends to the model, then `scanned N PDFs...` every 50 files while it looks for
 unfiled PDFs. Applying logs `[i/N] <action> <file>`. Add `-q` if you would rather
 have silence.
+
+**Scans show *"could not be found"* in their notes.** See
+[When a note says "could not be found"](#when-a-note-says-could-not-be-found):
+`scanvault repair --vault ~/Obsidian/Archive` lists them, and `--apply` mends
+them.
 
 ## Notes and limits
 
