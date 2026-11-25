@@ -482,7 +482,8 @@ class Vault:
         matches = [
             path
             for path in self.root.rglob(name)
-            if path.is_file() and not any(part.startswith(".") for part in path.parts)
+            if path.is_file()
+            and not any(part.startswith(".") for part in path.relative_to(self.root).parts)
         ]
         # Ambiguous is as good as missing: acting on the wrong file is worse
         # than leaving the note alone.
@@ -516,6 +517,18 @@ class Vault:
         `attachment:` key; treating those as loose would file a second copy and
         break the link.
         """
+        linked = self.linked_index()
+        for path in sorted(self.root.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in DOCUMENT_SUFFIXES:
+                continue
+            if any(part.startswith(".") for part in path.relative_to(self.root).parts):
+                continue
+            if self.is_linked(path, linked):
+                continue
+            yield path
+
+    def linked_index(self) -> tuple[set[Path], set[str]]:
+        """Every document some note points at: as resolved paths, and as bare names."""
         linked_paths: set[Path] = set()
         linked_names: set[str] = set()
         for note in self.iter_notes():
@@ -526,15 +539,12 @@ class Vault:
                     self._record_link(value, linked_paths, linked_names)
             for target in link_targets(body):
                 self._record_link(target, linked_paths, linked_names)
+        return linked_paths, linked_names
 
-        for path in sorted(self.root.rglob("*")):
-            if not path.is_file() or path.suffix.lower() not in DOCUMENT_SUFFIXES:
-                continue
-            if any(part.startswith(".") for part in path.relative_to(self.root).parts):
-                continue
-            if path.resolve() in linked_paths or path.name in linked_names:
-                continue
-            yield path
+    @staticmethod
+    def is_linked(path: Path, linked: tuple[set[Path], set[str]]) -> bool:
+        linked_paths, linked_names = linked
+        return path.resolve() in linked_paths or path.name in linked_names
 
     def iter_note_tags(self) -> Iterator[list[str]]:
         """Every note's tags, so the vocabulary already in the vault is known.
